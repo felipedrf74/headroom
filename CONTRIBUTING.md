@@ -25,8 +25,18 @@ There is no Dock icon. After launch, look at the right side of the menu bar.
 
 Parser and sign-in tests live in `HeadroomTests`. Run them from Xcode when it is installed.
 
-## Pull requests
+## Sending a change
+
+Do not push to `main`. That branch is protected.
+
+1. Fork the repository.
+2. Work on a branch in your fork.
+3. Open a pull request against `main`.
+4. Wait. Only the maintainer can approve and merge.
+
+A pull request is a request. It is not a commit on this repo until it is approved.
 
 - Keep the change scoped to one problem.
 - Include a screenshot of the extra and the popover when UI changes.
 - Confirm a missing credential on one provider does not blank the others.
+- Do not put names, emails, user IDs, or tokens in the PR.

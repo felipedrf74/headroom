@@ -97,7 +97,9 @@ Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at l
 ./scripts/build.sh
 ```
 
-DerivedData is forced to `~/Library/Developer/Xcode/DerivedData/Headroom`. UI, tokens, and provider contracts: [`.grok/skills/headroom-macos/SKILL.md`](.grok/skills/headroom-macos/SKILL.md). How to send a change: [CONTRIBUTING.md](CONTRIBUTING.md).
+DerivedData is forced to `~/Library/Developer/Xcode/DerivedData/Headroom`. UI, tokens, and provider contracts: [`.grok/skills/headroom-macos/SKILL.md`](.grok/skills/headroom-macos/SKILL.md).
+
+`main` is protected. Send a change as a pull request from a fork; the maintainer has to approve it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
