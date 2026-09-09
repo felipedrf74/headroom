@@ -1,0 +1,7 @@
+{
+  "images" : [
+    { "filename" : "ProviderBot-32.png", "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "ProviderBot-64.png", "idiom" : "universal", "scale" : "2x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

@@ -1,0 +1,9 @@
+{
+  "currentPeriodStart": "2026-09-01T15:47:23.732Z",
+  "nextResetTimestampUtc": "2026-09-06T19:00:40.927Z",
+  "usagePercent": 8.708505,
+  "hasAvailableUsage": true,
+  "hasNonZeroIncludedLimit": true,
+  "includedUsageSuperGrokPlan": "supergrok-heavy",
+  "grokPlanLabel": "SuperGrok Heavy"
+}

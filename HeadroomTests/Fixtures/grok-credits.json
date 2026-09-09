@@ -1,0 +1,14 @@
+{
+  "config": {
+    "creditUsagePercent": 42.5,
+    "currentPeriod": {
+      "type": "USAGE_PERIOD_TYPE_WEEKLY",
+      "start": "2026-09-02T06:37:39.971079+00:00",
+      "end": "2026-09-09T06:37:39.971079+00:00"
+    },
+    "onDemandCap": { "val": 5000 },
+    "onDemandUsed": { "val": 250 },
+    "isUnifiedBillingUser": true,
+    "prepaidBalance": { "val": 0 }
+  }
+}

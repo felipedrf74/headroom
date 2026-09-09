@@ -1,0 +1,19 @@
+name: Idea
+description: A change to Headroom
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What should Headroom do that it does not do now?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: When would you use this, and what does it replace?
+    validations:
+      required: true

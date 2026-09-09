@@ -1,0 +1,52 @@
+name: Bug
+description: Something in Headroom is wrong
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste tokens, emails, names, or session files.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Menu bar
+        - Popover
+        - Sign in
+        - Grok Build
+        - Grok Bot
+        - Claude
+        - OpenAI
+        - Cursor
+        - Build / install
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      placeholder: The extra shows –% for Claude after a refresh.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.6"
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      options:
+        - label: This report contains no tokens, emails, or names.
+          required: true
