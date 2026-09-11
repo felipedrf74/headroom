@@ -221,12 +221,9 @@ struct MenuMeter: Equatable, Identifiable, Sendable {
     var provider: Provider
     var valueText: String
     var remaining: Double
+    var usedPercent: Double
     var isStale: Bool
     var isPlaceholder: Bool
 
     var id: Provider { provider }
-
-    var usedPercent: Double {
-        max(0, min(100, 100 - remaining))
-    }
 }

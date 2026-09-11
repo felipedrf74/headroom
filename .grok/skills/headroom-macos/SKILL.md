@@ -23,7 +23,7 @@ Community menu-bar extra. Glance first. Apple-native, not a web page. Bundle ID 
 | Tight | `#C47A2C` | Remaining ≤ 25% |
 | Critical | `#C23B22` | Remaining ≤ 10% |
 | Stale | secondary at 0.55 opacity | Last-good after a failed refresh |
-| Menu type | 10pt caption + 12pt semibold % | World Clock columns |
+| Menu type | 12pt semibold tabular % | Menu-bar extra |
 | Popover name | system 13 semibold | `Grok` |
 | Popover % | system 22 medium, tabular | `42%` |
 | Caption | system 11 regular, secondary | `Weekly · resets in 3d 4h` |
@@ -43,7 +43,7 @@ Enabled + connected providers only:
   Meters:    [glyph]|     [glyph]|     [glyph]|
 ```
 
-`AppSettings.menuStyle` is Percents or Meters. Meters are iStat-style vertical capsules with a 1pt outline so remaining quota is visible. Fill from the bottom = used %. Fill color uses `HeadroomTokens.meterFill`. No leading health dot. Menu-bar marks are template logos (`GlyphBuild` Grok slash-G / `GlyphBot` face / `GlyphGPT` blossom) plus paths for Claude and Cursor. Photographed app icons stay in the popover via `ProviderIcon`. Short names: Build, Bot, Claude, GPT, Cursor. Loading uses `–%`. Signed-out / expired providers are omitted. Never hide an enabled connected provider.
+`AppSettings.menuStyle` is Percents or Meters. Meters follow iStat-style vertical capsules: 5×18pt, 1pt primary outline, fill from the bottom. Fill height is `innerHeight × usedPercent / 100` of the inset track, clipped to the capsule so 50% used is half the inner bar. Glyphs are 16.4pt. Grok and GPT marks are vector templates (full even-odd Grok slash, not a cropped PNG). Fill color uses `HeadroomTokens.meterFill`. No leading health dot. Photographed app icons stay in the popover via `ProviderIcon`. Short names: Build, Bot, Claude, GPT, Cursor. Loading uses `–%`. Percents round to a whole number when within 0.05, otherwise one decimal. Signed-out / expired providers are omitted. Never hide an enabled connected provider. Opening the popover refreshes if the last attempt is older than 45s. Unchanged usage does not rewrite status or the menu extra.
 
 The extra is an **AppKit `NSStatusItem`** hosting `MenuBarLabel` in a passthrough `NSHostingView`. Click opens an `NSPopover`. Settings is `AppDelegate.openSettings`. `LSUIElement`. Install to `/Applications/Headroom.app`.
 

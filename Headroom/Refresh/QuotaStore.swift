@@ -17,6 +17,7 @@ final class QuotaStore {
     private var loopTask: Task<Void, Never>?
     private var wakeTask: Task<Void, Never>?
     private var inFlight: Task<Void, Never>?
+    private var snapshotsDirty = false
     private let logger = Logger(subsystem: HeadroomIdentity.bundleID, category: "refresh")
 
     init(
@@ -73,6 +74,13 @@ final class QuotaStore {
         signIn.cancel()
     }
 
+    func refreshIfStale(after seconds: TimeInterval = 45) async {
+        if let lastAttempt, Date().timeIntervalSince(lastAttempt) < seconds {
+            return
+        }
+        await refresh(force: true)
+    }
+
     func refresh(force: Bool = false, providers: [Provider]? = nil) async {
         if let inFlight {
             await inFlight.value
@@ -123,6 +131,7 @@ final class QuotaStore {
                     provider: provider,
                     valueText: "--",
                     remaining: 100,
+                    usedPercent: 0,
                     isStale: false,
                     isPlaceholder: true
                 )
@@ -131,6 +140,7 @@ final class QuotaStore {
                     provider: provider,
                     valueText: Self.percentText(snapshot.usedPercent),
                     remaining: snapshot.remainingPercent,
+                    usedPercent: snapshot.usedPercent,
                     isStale: status.isStale,
                     isPlaceholder: false
                 )
@@ -161,7 +171,7 @@ final class QuotaStore {
     }
 
     static func percentText(_ value: Double) -> String {
-        String(Int(value.rounded()))
+        HeadroomFormat.percentText(value)
     }
 
     private static func fetchWithBudget(_ client: any ProviderClient) async -> Result<QuotaSnapshot, ProviderError> {
@@ -182,27 +192,45 @@ final class QuotaStore {
     private func apply(provider: Provider, result: Result<QuotaSnapshot, ProviderError>) {
         switch result {
         case .success(let snapshot):
+            if case .live(let old) = statuses[provider], Self.usageEqual(old, snapshot) {
+                return
+            }
             statuses[provider] = .live(snapshot)
-            logger.info("refreshed \(provider.rawValue, privacy: .public)")
+            snapshotsDirty = true
         case .failure(let error):
             let cached = statuses[provider]?.snapshot
+            let next: ProviderStatus
             switch error {
             case .signedOut(let hint):
-                statuses[provider] = .signedOut(hint)
+                next = .signedOut(hint)
             case .expired(let hint):
-                statuses[provider] = .expired(hint)
+                next = .expired(hint)
             case .unreachable, .parse:
                 if let cached {
-                    statuses[provider] = .stale(cached)
+                    next = .stale(cached)
                 } else {
-                    statuses[provider] = .unreachable(cached: nil)
+                    next = .unreachable(cached: nil)
                 }
             }
-            logger.error("refresh failed \(provider.rawValue, privacy: .public)")
+            if statuses[provider] != next {
+                statuses[provider] = next
+                snapshotsDirty = true
+                logger.error("refresh failed \(provider.rawValue, privacy: .public)")
+            }
         }
     }
 
+    private static func usageEqual(_ a: QuotaSnapshot, _ b: QuotaSnapshot) -> Bool {
+        a.provider == b.provider
+            && a.usedPercent == b.usedPercent
+            && a.resetsAt == b.resetsAt
+            && a.primaryTitle == b.primaryTitle
+            && a.windows == b.windows
+    }
+
     private func persistLiveSnapshots() {
+        guard snapshotsDirty else { return }
+        snapshotsDirty = false
         var snapshots: [Provider: QuotaSnapshot] = [:]
         for (provider, status) in statuses {
             if let snapshot = status.snapshot {

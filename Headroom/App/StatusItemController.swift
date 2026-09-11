@@ -50,6 +50,7 @@ final class StatusItemController: NSObject {
 
         let hosted = PassthroughHostingView(rootView: MenuBarLabel(meters: []))
         hosted.translatesAutoresizingMaskIntoConstraints = true
+        hosted.clipsToBounds = false
         item.button?.addSubview(hosted)
         hosting = hosted
 
@@ -90,15 +91,11 @@ final class StatusItemController: NSObject {
         hosting.rootView = MenuBarLabel(meters: meters, style: style)
         hosting.layoutSubtreeIfNeeded()
         let fitted = hosting.fittingSize
-        let height = max(button.bounds.height, 22)
+        let height = HeadroomTokens.menuRowHeight
         let width = max(ceil(fitted.width), 36)
-        let drawHeight = min(max(fitted.height, 1), height)
-        hosting.frame = NSRect(
-            x: 0,
-            y: ((height - drawHeight) / 2).rounded(.toNearestOrAwayFromZero),
-            width: width,
-            height: drawHeight
-        )
+        let buttonHeight = max(button.bounds.height, 22)
+        let y = ((buttonHeight - height) / 2).rounded(.toNearestOrAwayFromZero)
+        hosting.frame = NSRect(x: 0, y: y, width: width, height: height)
         item.length = width
         button.toolTip = MenuBarLayout.tooltip(for: meters)
     }
@@ -128,6 +125,7 @@ final class StatusItemController: NSObject {
             guard let self, let button = self.item.button else { return }
             self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             self.startClickMonitors()
+            Task { await self.store.refreshIfStale() }
         }
     }
 

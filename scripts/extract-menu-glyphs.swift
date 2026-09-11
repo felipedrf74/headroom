@@ -15,14 +15,13 @@ struct Job {
     var kind: Kind
 }
 
+let scriptDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let assets = URL(fileURLWithPath: CommandLine.arguments[1])
 
 let jobs = [
     Job(
         name: "GlyphBuild",
-        source: URL(fileURLWithPath: CommandLine.arguments[0])
-            .deletingLastPathComponent()
-            .appendingPathComponent("grok.svg"),
+        source: scriptDir.appendingPathComponent("grok.svg"),
         kind: .darkOnLight
     ),
     Job(
@@ -32,15 +31,13 @@ let jobs = [
     ),
     Job(
         name: "GlyphGPT",
-        source: URL(fileURLWithPath: CommandLine.arguments[0])
-            .deletingLastPathComponent()
-            .appendingPathComponent("openai.svg"),
+        source: scriptDir.appendingPathComponent("openai.svg"),
         kind: .darkOnLight
     ),
 ]
 
 func loadCGImage(_ url: URL) -> CGImage? {
-    if url.pathExtension.lowercased() == "icns", let image = NSImage(contentsOf: url) {
+    if let image = NSImage(contentsOf: url) {
         var rect = NSRect(origin: .zero, size: image.size)
         if image.size.width < 128 {
             image.size = NSSize(width: 256, height: 256)
@@ -290,7 +287,7 @@ for job in jobs {
         continue
     }
     let folder = assets.appendingPathComponent("\(job.name).imageset")
-    let sizes = [(1, 16), (2, 32), (3, 48)]
+    let sizes = [(1, 24), (2, 48), (3, 72)]
     var contents: [[String: Any]] = []
     for (scale, px) in sizes {
         guard let img = scaled(mark, to: px) else { continue }

@@ -104,14 +104,14 @@ final class ParserTests: XCTestCase {
 
     func testMenuBarCollapse() {
         let four = [
-            MenuMeter(provider: .grok, valueText: "42", remaining: 58, isStale: false, isPlaceholder: false),
-            MenuMeter(provider: .claude, valueText: "71", remaining: 29, isStale: false, isPlaceholder: false),
-            MenuMeter(provider: .openai, valueText: "18", remaining: 82, isStale: false, isPlaceholder: false),
-            MenuMeter(provider: .cursor, valueText: "55", remaining: 45, isStale: false, isPlaceholder: false),
+            MenuMeter(provider: .grok, valueText: "42", remaining: 58, usedPercent: 42, isStale: false, isPlaceholder: false),
+            MenuMeter(provider: .claude, valueText: "71", remaining: 29, usedPercent: 71, isStale: false, isPlaceholder: false),
+            MenuMeter(provider: .openai, valueText: "18", remaining: 82, usedPercent: 18, isStale: false, isPlaceholder: false),
+            MenuMeter(provider: .cursor, valueText: "55", remaining: 45, usedPercent: 55, isStale: false, isPlaceholder: false),
         ]
         XCTAssertEqual(MenuBarLayout.density(for: four), .compact)
         let five = four + [
-            MenuMeter(provider: .grokBot, valueText: "9", remaining: 91, isStale: false, isPlaceholder: false),
+            MenuMeter(provider: .grokBot, valueText: "9", remaining: 91, usedPercent: 9, isStale: false, isPlaceholder: false),
         ]
         XCTAssertEqual(MenuBarLayout.density(for: five), .compact)
         XCTAssertEqual(
@@ -146,6 +146,13 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(oauth["refreshToken"] as? String, "r2")
         XCTAssertEqual((oauth["expiresAt"] as? NSNumber)?.intValue, 1_100_000)
         XCTAssertEqual(oauth["scopes"] as? [String], ["user:inference"])
+    }
+
+    func testPercentTextKeepsTenthWhenItMatters() {
+        XCTAssertEqual(HeadroomFormat.percentText(42), "42")
+        XCTAssertEqual(HeadroomFormat.percentText(42.04), "42")
+        XCTAssertEqual(HeadroomFormat.percentText(13.649571), "13.6")
+        XCTAssertEqual(HeadroomFormat.percentText(8.708505), "8.7")
     }
 
     func testRelativeTime() {

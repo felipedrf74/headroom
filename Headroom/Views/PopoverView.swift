@@ -36,6 +36,7 @@ struct PopoverView: View {
                 .padding(.vertical, 10)
         }
         .frame(width: HeadroomTokens.popoverWidth)
+        .transaction { $0.animation = nil }
     }
 
     private func cards(_ providers: [Provider]) -> some View {

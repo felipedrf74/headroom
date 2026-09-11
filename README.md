@@ -85,7 +85,7 @@ Claude tokens expire about every eight hours. Headroom refreshes them the same w
 
 ## Privacy
 
-Headroom caches only percentages, reset times, and window labels in `~/Library/Application Support/Headroom/`. See [PRIVACY.md](PRIVACY.md).
+Headroom caches only percentages, reset times, and window labels in `~/Library/Application Support/Headroom/`. See [PRIVACY.md](PRIVACY.md). What changed between releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Settings
 

@@ -1,5 +1,16 @@
 import SwiftUI
 
+enum HeadroomFormat {
+    static func percentText(_ value: Double) -> String {
+        let clamped = max(0, min(100, value))
+        let nearest = clamped.rounded()
+        if abs(clamped - nearest) < 0.05 {
+            return String(Int(nearest))
+        }
+        return String(format: "%.1f", clamped)
+    }
+}
+
 enum HeadroomTokens {
     static let tightRemaining = 25.0
     static let criticalRemaining = 10.0
@@ -12,11 +23,14 @@ enum HeadroomTokens {
 
     static let menuLabelSize: CGFloat = 10
     static let menuPercentSize: CGFloat = 12
-    static let menuIconSize: CGFloat = 14
-    static let menuColumnSpacing: CGFloat = 9
-    static let menuMeterBarWidth: CGFloat = 8
+    static let menuIconSize: CGFloat = 16.4
+    static let menuRowHeight: CGFloat = 20
+    static let menuColumnSpacing: CGFloat = 8
+    static let menuMeterBarWidth: CGFloat = 5
     static let menuMeterBarHeight: CGFloat = 18
     static let menuMeterSpacing: CGFloat = 6
+    static let menuMeterStroke: CGFloat = 1
+    static let menuMeterCorner: CGFloat = 2.5
     static let popoverNameSize: CGFloat = 13
     static let popoverPercentSize: CGFloat = 22
     static let captionSize: CGFloat = 11
@@ -41,6 +55,6 @@ enum HeadroomTokens {
     }
 
     static func meterFill(remaining: Double, isStale: Bool) -> Color {
-        ink(remaining: remaining, isStale: isStale).opacity(isStale ? 1 : 0.85)
+        ink(remaining: remaining, isStale: isStale)
     }
 }

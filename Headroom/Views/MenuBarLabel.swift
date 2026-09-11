@@ -42,8 +42,10 @@ struct MenuBarLabel: View {
                 }
             }
         }
-        .padding(.horizontal, 4)
+        .frame(height: HeadroomTokens.menuRowHeight)
+        .padding(.horizontal, 2)
         .fixedSize()
+        .transaction { $0.animation = nil }
     }
 
     private var columnSpacing: CGFloat {
@@ -68,18 +70,20 @@ struct MenuBarLabel: View {
                 .opacity(0.92 * faded)
             Text(percent)
                 .font(.system(size: HeadroomTokens.menuPercentSize, weight: .semibold).monospacedDigit())
-                .tracking(-0.2)
+                .tracking(-0.3)
+                .offset(y: 0.5)
                 .opacity(faded)
         }
         .foregroundStyle(.primary)
+        .frame(height: HeadroomTokens.menuRowHeight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(meter.provider.displayName) \(percent)")
+        .accessibilityLabel("\(meter.provider.displayName) \(percent) used")
     }
 
     private func meterColumn(_ meter: MenuMeter) -> some View {
         let percent = meter.isPlaceholder ? "–%" : "\(meter.valueText)%"
         let faded = meter.isStale ? HeadroomTokens.staleOpacity : 1
-        return HStack(alignment: .center, spacing: 2) {
+        return HStack(alignment: .center, spacing: 3) {
             ProviderGlyph(provider: meter.provider, size: HeadroomTokens.menuIconSize)
                 .opacity(0.92 * faded)
             MenuUsageBar(
@@ -88,8 +92,10 @@ struct MenuBarLabel: View {
                 isStale: meter.isStale
             )
         }
+        .foregroundStyle(.primary)
+        .frame(height: HeadroomTokens.menuRowHeight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(meter.provider.displayName) \(percent)")
+        .accessibilityLabel("\(meter.provider.displayName) \(percent) used")
     }
 }
 
@@ -100,32 +106,37 @@ struct MenuUsageBar: View {
 
     var body: some View {
         let fraction = MeterLayout.usedFraction(usedPercent)
-        let width = HeadroomTokens.menuMeterBarWidth
-        let height = HeadroomTokens.menuMeterBarHeight
-        let stroke: CGFloat = 1
-        Capsule()
-            .fill(Color.primary.opacity(0.10))
-            .overlay {
-                GeometryReader { geo in
-                    let innerW = max(0, geo.size.width - stroke * 2)
-                    let innerH = max(0, geo.size.height - stroke * 2)
-                    ZStack(alignment: .bottom) {
-                        Color.clear
-                        if fraction > 0 {
-                            Capsule()
-                                .fill(HeadroomTokens.meterFill(remaining: remaining, isStale: isStale))
-                                .frame(width: innerW, height: max(2, innerH * fraction))
-                        }
-                    }
-                    .padding(stroke)
+        let fill = HeadroomTokens.meterFill(remaining: remaining, isStale: isStale)
+        Canvas { context, size in
+            let stroke = HeadroomTokens.menuMeterStroke
+            let outline = CGRect(
+                x: stroke / 2,
+                y: stroke / 2,
+                width: max(size.width - stroke, 1),
+                height: max(size.height - stroke, 1)
+            )
+            let inner = outline.insetBy(dx: stroke / 2, dy: stroke / 2)
+            let capsuleRadius = outline.width / 2
+            let rim = Path(roundedRect: outline, cornerRadius: capsuleRadius, style: .continuous)
+            let clip = Path(roundedRect: inner, cornerRadius: max(inner.width / 2, 0.5), style: .continuous)
+
+            context.fill(clip, with: .color(Color.primary.opacity(0.06)))
+            if fraction > 0 {
+                let fillHeight = MeterLayout.fillLength(usedPercent: usedPercent, total: inner.height)
+                let fillRect = CGRect(
+                    x: inner.minX,
+                    y: inner.maxY - fillHeight,
+                    width: inner.width,
+                    height: fillHeight
+                )
+                context.drawLayer { layer in
+                    layer.clip(to: clip)
+                    layer.fill(Path(fillRect), with: .color(fill))
                 }
             }
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color.primary.opacity(0.92), lineWidth: stroke)
-            }
-            .clipShape(Capsule())
-            .frame(width: width, height: height)
-            .accessibilityHidden(true)
+            context.stroke(rim, with: .color(Color.primary), lineWidth: stroke)
+        }
+        .frame(width: HeadroomTokens.menuMeterBarWidth, height: HeadroomTokens.menuMeterBarHeight)
+        .accessibilityHidden(true)
     }
 }
