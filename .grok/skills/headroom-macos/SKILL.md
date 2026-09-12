@@ -19,9 +19,11 @@ Community menu-bar extra. Glance first. Apple-native, not a web page. Bundle ID 
 | Ink | `Color.primary` | Names, healthy numbers |
 | Mute | `Color.secondary` | Captions, timestamps |
 | Track | `Color.primary.opacity(0.12)` | Empty meter |
-| Fill | `Color.primary.opacity(0.85)` | Healthy used-bar |
-| Tight | `#C47A2C` | Remaining ≤ 25% |
-| Critical | `#C23B22` | Remaining ≤ 10% |
+| Fill | usage gradient | Weekly used-bar |
+| Healthy | `#6EC4F5` | 0% used (light blue) |
+| Watch | `#F2C416` | ~50% used |
+| Tight | `#E87A10` | ~75% used |
+| Critical | `#D62D26` | 100% used |
 | Stale | secondary at 0.55 opacity | Last-good after a failed refresh |
 | Menu type | 12pt semibold tabular % | Menu-bar extra |
 | Popover name | system 13 semibold | `Grok` |
@@ -32,7 +34,7 @@ Community menu-bar extra. Glance first. Apple-native, not a web page. Bundle ID 
 
 Memorable element: compact extra — brand glyph + tabular %, or iStat-style vertical used-bars. Names live in the popover. No status dot. Keep it narrow so macOS 27 does not park it behind the overflow chevron.
 
-`HeadroomTokens.ink(remaining:isStale:)` owns popover percent color. Menu-bar type uses `Color.primary` only. Do not duplicate thresholds.
+`HeadroomTokens.ink(remaining:isStale:)` owns popover percent color. Menu-bar type uses `Color.primary` only. Menu-bar meters use one solid color from `usageColor(usedPercent:)` (light blue < 50%, yellow < 75%, orange < 90%, red at 90%+). The popover track keeps `usageGradient`. Do not duplicate thresholds.
 
 ## Menu bar
 
@@ -43,7 +45,7 @@ Enabled + connected providers only:
   Meters:    [glyph]|     [glyph]|     [glyph]|
 ```
 
-`AppSettings.menuStyle` is Percents or Meters. Meters follow iStat-style vertical capsules: 5×18pt, 1pt primary outline, fill from the bottom. Fill height is `innerHeight × usedPercent / 100` of the inset track, clipped to the capsule so 50% used is half the inner bar. Glyphs are 16.4pt. Grok and GPT marks are vector templates (full even-odd Grok slash, not a cropped PNG). Fill color uses `HeadroomTokens.meterFill`. No leading health dot. Photographed app icons stay in the popover via `ProviderIcon`. Short names: Build, Bot, Claude, GPT, Cursor. Loading uses `–%`. Percents round to a whole number when within 0.05, otherwise one decimal. Signed-out / expired providers are omitted. Never hide an enabled connected provider. Opening the popover refreshes if the last attempt is older than 45s. Unchanged usage does not rewrite status or the menu extra.
+`AppSettings.menuStyle` is Percents or Meters. Meters are vertical rounded rectangles: 8.05×18pt, 1.6pt corners (soft, not a pill), 1pt primary outline. Used fill sits in an inner well 1.2pt off the stroke so it does not touch the outline. Fill height is `wellHeight × usedPercent / 100` from the bottom of that well. Glyphs are 17.22pt. Grok and GPT marks are vector templates (full even-odd Grok slash, not a cropped PNG). Menu-bar fill is one color by used % (light blue / yellow / orange / red). Popover meters keep the light-blue → red gradient. No leading health dot. Photographed app icons stay in the popover via `ProviderIcon`. Short names: Build, Bot, Claude, GPT, Cursor. Loading uses `–%`. Percents are whole numbers (`55%`, not `55.2%`). Signed-out / expired providers are omitted. Never hide an enabled connected provider. Opening the popover refreshes if the last attempt is older than 45s. Unchanged usage does not rewrite status or the menu extra.
 
 The extra is an **AppKit `NSStatusItem`** hosting `MenuBarLabel` in a passthrough `NSHostingView`. Click opens an `NSPopover`. Settings is `AppDelegate.openSettings`. `LSUIElement`. Install to `/Applications/Headroom.app`.
 

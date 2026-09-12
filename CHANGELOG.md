@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2 — 2026-09-12
+
+### Menu bar
+- Meters are 8.05×18 pt rounded rectangles (soft corners, not pills). Used fill sits 1.2 pt inside the outline.
+- Percents are whole numbers (`55%`, not `55.2%`).
+- Menu-bar fill is one color by used %: light blue under 50%, yellow under 75%, orange under 90%, red at 90%+.
+- The popover still uses the light-blue → yellow → orange → red gradient.
+
 ## 1.1 — 2026-09-11
 
 ### Menu bar

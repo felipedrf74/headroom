@@ -151,8 +151,9 @@ final class ParserTests: XCTestCase {
     func testPercentTextKeepsTenthWhenItMatters() {
         XCTAssertEqual(HeadroomFormat.percentText(42), "42")
         XCTAssertEqual(HeadroomFormat.percentText(42.04), "42")
-        XCTAssertEqual(HeadroomFormat.percentText(13.649571), "13.6")
-        XCTAssertEqual(HeadroomFormat.percentText(8.708505), "8.7")
+        XCTAssertEqual(HeadroomFormat.percentText(13.649571), "14")
+        XCTAssertEqual(HeadroomFormat.percentText(8.708505), "9")
+        XCTAssertEqual(HeadroomFormat.percentText(55.2), "55")
     }
 
     func testRelativeTime() {

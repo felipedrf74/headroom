@@ -106,7 +106,6 @@ struct MenuUsageBar: View {
 
     var body: some View {
         let fraction = MeterLayout.usedFraction(usedPercent)
-        let fill = HeadroomTokens.meterFill(remaining: remaining, isStale: isStale)
         Canvas { context, size in
             let stroke = HeadroomTokens.menuMeterStroke
             let outline = CGRect(
@@ -116,23 +115,24 @@ struct MenuUsageBar: View {
                 height: max(size.height - stroke, 1)
             )
             let inner = outline.insetBy(dx: stroke / 2, dy: stroke / 2)
-            let capsuleRadius = outline.width / 2
-            let rim = Path(roundedRect: outline, cornerRadius: capsuleRadius, style: .continuous)
-            let clip = Path(roundedRect: inner, cornerRadius: max(inner.width / 2, 0.5), style: .continuous)
+            let well = inner.insetBy(dx: HeadroomTokens.menuMeterFillInset, dy: HeadroomTokens.menuMeterFillInset)
+            let radius = HeadroomTokens.menuMeterCorner
+            let rim = Path(roundedRect: outline, cornerRadius: radius, style: .continuous)
+            let fillRadius = max(radius - stroke / 2 - HeadroomTokens.menuMeterFillInset, 0.7)
 
-            context.fill(clip, with: .color(Color.primary.opacity(0.06)))
-            if fraction > 0 {
-                let fillHeight = MeterLayout.fillLength(usedPercent: usedPercent, total: inner.height)
+            if fraction > 0, well.width > 0, well.height > 0 {
+                let fillHeight = MeterLayout.fillLength(usedPercent: usedPercent, total: well.height)
                 let fillRect = CGRect(
-                    x: inner.minX,
-                    y: inner.maxY - fillHeight,
-                    width: inner.width,
+                    x: well.minX,
+                    y: well.maxY - fillHeight,
+                    width: well.width,
                     height: fillHeight
                 )
-                context.drawLayer { layer in
-                    layer.clip(to: clip)
-                    layer.fill(Path(fillRect), with: .color(fill))
-                }
+                let corner = min(fillRadius, fillRect.height / 2)
+                context.fill(
+                    Path(roundedRect: fillRect, cornerRadius: corner, style: .continuous),
+                    with: .color(HeadroomTokens.usageColor(usedPercent: usedPercent, isStale: isStale))
+                )
             }
             context.stroke(rim, with: .color(Color.primary), lineWidth: stroke)
         }
