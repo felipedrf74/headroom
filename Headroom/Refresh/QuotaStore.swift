@@ -83,8 +83,13 @@ final class QuotaStore {
 
     func refresh(force: Bool = false, providers: [Provider]? = nil) async {
         if let inFlight {
-            await inFlight.value
-            return
+            if force {
+                inFlight.cancel()
+                await inFlight.value
+            } else {
+                await inFlight.value
+                return
+            }
         }
         if !force, let lastAttempt, Date().timeIntervalSince(lastAttempt) < 15 {
             return
@@ -175,17 +180,23 @@ final class QuotaStore {
     }
 
     private static func fetchWithBudget(_ client: any ProviderClient) async -> Result<QuotaSnapshot, ProviderError> {
-        await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>.self) { group in
+        await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
             group.addTask { await client.fetch() }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(HeadroomHTTP.fetchBudget * 1_000_000_000))
-                return .failure(.unreachable)
+                return nil
             }
-            if let first = await group.next() {
+            var result: Result<QuotaSnapshot, ProviderError> = .failure(.unreachable)
+            while let next = await group.next() {
+                if let next {
+                    result = next
+                    group.cancelAll()
+                    break
+                }
                 group.cancelAll()
-                return first
+                break
             }
-            return .failure(.unreachable)
+            return result
         }
     }
 

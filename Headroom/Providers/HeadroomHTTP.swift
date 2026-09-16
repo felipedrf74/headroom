@@ -1,8 +1,8 @@
 import Foundation
 
 enum HeadroomHTTP {
-    static let timeout: TimeInterval = 8
-    static let fetchBudget: TimeInterval = 12
+    static let timeout: TimeInterval = 12
+    static let fetchBudget: TimeInterval = 20
 
     static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral

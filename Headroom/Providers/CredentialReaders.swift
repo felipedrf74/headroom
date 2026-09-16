@@ -108,6 +108,18 @@ enum CredentialReaders {
         sessionStamp(provider) != nil
     }
 
+    static func hasUsableSession(_ provider: Provider) -> Bool {
+        switch provider {
+        case .claude:
+            guard let auth = try? claudeAuth() else { return false }
+            return !auth.accessToken.isEmpty && (!auth.isExpired || auth.canRefresh)
+        case .cursor, .grokBot:
+            return hasUsableCursorSession()
+        default:
+            return hasSession(provider)
+        }
+    }
+
     static func sessionStamp(_ provider: Provider) -> String? {
         switch provider {
         case .grok:
@@ -215,6 +227,7 @@ enum CredentialReaders {
         var accessToken: String
         var refreshToken: String?
         var expiresAtMs: Double?
+        var refreshExpiresAtMs: Double?
         var rawJSON: String
         var account: String
         var service: String
@@ -222,6 +235,14 @@ enum CredentialReaders {
         var isExpired: Bool {
             guard let expiresAtMs else { return false }
             return Date().timeIntervalSince1970 * 1000 >= expiresAtMs - 60_000
+        }
+
+        var canRefresh: Bool {
+            guard let refreshToken, !refreshToken.isEmpty else { return false }
+            if let refreshExpiresAtMs {
+                return Date().timeIntervalSince1970 * 1000 < refreshExpiresAtMs - 60_000
+            }
+            return true
         }
     }
 
@@ -265,7 +286,7 @@ enum CredentialReaders {
         if !auth.isExpired, !auth.accessToken.isEmpty {
             return auth.accessToken
         }
-        guard let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
+        guard auth.canRefresh, let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
             throw ProviderError.expired(Provider.claude.expiredHint)
         }
 
@@ -280,6 +301,8 @@ enum CredentialReaders {
             URL(string: "https://console.anthropic.com/v1/oauth/token")!,
         ]
         var refreshed: [String: Any]?
+        var sawNetworkFailure = false
+        var sawRejectedGrant = false
         for url in urls {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
@@ -295,14 +318,28 @@ enum CredentialReaders {
                     refreshed = try JSONFlex.object(from: data)
                     break
                 }
+                if response.statusCode == 401 || response.statusCode == 403 {
+                    sawRejectedGrant = true
+                    continue
+                }
+                if response.statusCode == 400,
+                   let object = try? JSONFlex.object(from: data),
+                   (JSONFlex.string(object["error"]) ?? "").contains("invalid_grant") {
+                    sawRejectedGrant = true
+                    continue
+                }
+                sawNetworkFailure = true
             } catch {
-                continue
+                sawNetworkFailure = true
             }
         }
         guard let object = refreshed,
               let access = JSONFlex.string(object["access_token"]), !access.isEmpty
         else {
-            throw ProviderError.expired(Provider.claude.expiredHint)
+            if sawRejectedGrant {
+                throw ProviderError.expired(Provider.claude.expiredHint)
+            }
+            throw ProviderError.unreachable
         }
         let newRefresh = JSONFlex.string(object["refresh_token"])
         let expiresIn = JSONFlex.number(object["expires_in"]) ?? 28_800
@@ -495,6 +532,8 @@ enum CredentialReaders {
                 accessToken: token,
                 refreshToken: JSONFlex.string(nested["refreshToken"]) ?? JSONFlex.string(nested["refresh_token"]),
                 expiresAtMs: JSONFlex.number(nested["expiresAt"]) ?? JSONFlex.number(nested["expires_at"]),
+                refreshExpiresAtMs: JSONFlex.number(nested["refreshTokenExpiresAt"])
+                    ?? JSONFlex.number(nested["refresh_token_expires_at"]),
                 rawJSON: trimmed,
                 account: account,
                 service: service
@@ -505,6 +544,7 @@ enum CredentialReaders {
                 accessToken: trimmed,
                 refreshToken: nil,
                 expiresAtMs: nil,
+                refreshExpiresAtMs: nil,
                 rawJSON: trimmed,
                 account: account,
                 service: service

@@ -128,6 +128,23 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(try CredentialReaders.parseClaudeToken(json), "tok-123")
     }
 
+    func testClaudeRefreshTokenExpiry() throws {
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let live = """
+        {"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":\(nowMs + 3_600_000),"refreshTokenExpiresAt":\(nowMs + 7_200_000)}}
+        """
+        let liveAuth = try CredentialReaders.parseClaudeAuth(live, account: "test", service: "svc")
+        XCTAssertFalse(liveAuth.isExpired)
+        XCTAssertTrue(liveAuth.canRefresh)
+
+        let deadRefresh = """
+        {"claudeAiOauth":{"accessToken":"tok","refreshToken":"r","expiresAt":1,"refreshTokenExpiresAt":1}}
+        """
+        let deadAuth = try CredentialReaders.parseClaudeAuth(deadRefresh, account: "test", service: "svc")
+        XCTAssertTrue(deadAuth.isExpired)
+        XCTAssertFalse(deadAuth.canRefresh)
+    }
+
     func testClaudeRefreshPreservesSiblingKeys() throws {
         let json = """
         {"mcpOAuth":{"keep":true},"claudeAiOauth":{"accessToken":"old","refreshToken":"r1","expiresAt":1,"scopes":["user:inference"]}}

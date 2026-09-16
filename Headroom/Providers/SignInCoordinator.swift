@@ -48,7 +48,8 @@ final class SignInCoordinator {
     private func run(_ provider: Provider) async {
         phase = .running(provider)
         CredentialReaders.invalidateCaches()
-        if sessionReady(provider) {
+        let baseline = CredentialReaders.sessionStamp(provider)
+        if CredentialReaders.hasUsableSession(provider) {
             finishSuccess(provider)
             return
         }
@@ -68,13 +69,18 @@ final class SignInCoordinator {
                 phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
                 return
             }
-            launchInTerminal(executable: executable, arguments: provider.loginArguments)
+            let resetDeadSession = provider == .claude && !((try? CredentialReaders.claudeAuth())?.canRefresh ?? false)
+            launchInTerminal(
+                executable: executable,
+                arguments: provider.loginArguments,
+                resetClaudeSession: resetDeadSession
+            )
         }
 
-        let deadline = Date().addingTimeInterval(90)
+        let deadline = Date().addingTimeInterval(180)
         while !Task.isCancelled, Date() < deadline {
             CredentialReaders.invalidateCaches()
-            if sessionReady(provider) {
+            if sessionBecameUsable(provider, baseline: baseline) {
                 finishSuccess(provider)
                 return
             }
@@ -86,20 +92,20 @@ final class SignInCoordinator {
             return
         }
         CredentialReaders.invalidateCaches()
-        if sessionReady(provider) {
+        if sessionBecameUsable(provider, baseline: baseline) {
             finishSuccess(provider)
         } else {
             phase = .failed(provider, "Couldn't finish \(provider.displayName) sign-in.")
         }
     }
 
-    private func sessionReady(_ provider: Provider) -> Bool {
-        switch provider {
-        case .cursor, .grokBot:
-            CredentialReaders.hasUsableCursorSession()
-        default:
-            CredentialReaders.hasSession(provider)
+    private func sessionBecameUsable(_ provider: Provider, baseline: String?) -> Bool {
+        guard CredentialReaders.hasUsableSession(provider) else { return false }
+        let stamp = CredentialReaders.sessionStamp(provider)
+        if baseline == nil {
+            return stamp != nil
         }
+        return stamp != baseline
     }
 
     private func finishSuccess(_ provider: Provider) {
@@ -108,17 +114,19 @@ final class SignInCoordinator {
         onConnected?(provider)
     }
 
-    private func launchInTerminal(executable: URL, arguments: [String]) {
+    private func launchInTerminal(executable: URL, arguments: [String], resetClaudeSession: Bool = false) {
         guard !executable.path.isEmpty else { return }
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let folder = caches.appendingPathComponent("Headroom", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let script = folder.appendingPathComponent("login.command")
+        let quoted = Self.quote(executable.path)
+        let reset = resetClaudeSession ? "\(quoted) auth logout >/dev/null 2>&1 || true\n" : ""
         let command = """
         #!/bin/zsh
         export PATH=\(Self.quote(Tooling.searchPATH))
-        \(Self.quote(executable.path)) \(arguments.map(Self.quote).joined(separator: " "))
+        \(reset)\(quoted) \(arguments.map(Self.quote).joined(separator: " "))
         echo
         echo "You can close this window."
         """

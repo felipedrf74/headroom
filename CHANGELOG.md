@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 — 2026-09-12
+
+### Fixes
+- Claude Sign In no longer treats a dead Keychain session as logged in. If the refresh token is expired, Headroom runs `claude auth logout` then `claude auth login` and waits for new tokens.
+- OAuth/network timeouts stay as unreachable (last good reading) instead of locking the extra in Session expired.
+- A forced refresh after sign-in is not swallowed by an in-flight timed-out fetch.
+
 ## 1.2 — 2026-09-12
 
 ### Menu bar
