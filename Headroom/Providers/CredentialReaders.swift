@@ -111,6 +111,7 @@ enum CredentialReaders {
     static func hasUsableSession(_ provider: Provider) -> Bool {
         switch provider {
         case .claude:
+            if claudeRefreshRejected.withLock({ $0 }) { return false }
             guard let auth = try? claudeAuth() else { return false }
             return !auth.accessToken.isEmpty && (!auth.isExpired || auth.canRefresh)
         case .cursor, .grokBot:
@@ -144,6 +145,7 @@ enum CredentialReaders {
 
     static func invalidateCaches() {
         claudeCache.withLock { $0 = nil }
+        claudeServicesCache.withLock { $0 = nil }
         cursorCache.withLock { $0 = nil }
     }
 
@@ -254,6 +256,8 @@ enum CredentialReaders {
     }
 
     private static let claudeCache = OSAllocatedUnfairLock<ClaudeAuth?>(initialState: nil)
+    private static let claudeServicesCache = OSAllocatedUnfairLock<[String]?>(initialState: nil)
+    private static let claudeRefreshRejected = OSAllocatedUnfairLock(initialState: false)
     private static let cursorCache = OSAllocatedUnfairLock<(token: String, readAt: Date)?>(initialState: nil)
 
     static func claudeAuth() throws -> ClaudeAuth {
@@ -261,21 +265,80 @@ enum CredentialReaders {
             return cached
         }
         let account = NSUserName()
-        if let raw = readClaudeRawFromKeychain() {
-            let auth = try parseClaudeAuth(raw, account: account, service: claudeKeychainService)
-            claudeCache.withLock { $0 = auth }
-            return auth
+        if let found = readBestClaudeCredential(account: account) {
+            claudeCache.withLock { $0 = found.auth }
+            return found.auth
         }
         claudeCache.withLock { $0 = nil }
         throw ProviderError.signedOut(Provider.claude.signInHint)
     }
 
     private static func readClaudeRawFromKeychain() -> String? {
-        let account = NSUserName()
-        return securityPassword(service: claudeKeychainService, account: account)
-            ?? securityPassword(service: claudeKeychainService, account: nil)
-            ?? keychainPassword(service: claudeKeychainService, account: account)
-            ?? keychainPassword(service: claudeKeychainService)
+        readBestClaudeCredential(account: NSUserName())?.auth.rawJSON
+    }
+
+    private static func readBestClaudeCredential(account: String) -> (raw: String, auth: ClaudeAuth)? {
+        var best: (raw: String, auth: ClaudeAuth)?
+        for service in claudeCredentialServices() {
+            guard let raw = securityPassword(service: service, account: account)
+                ?? securityPassword(service: service, account: nil)
+                ?? keychainPassword(service: service, account: account)
+                ?? keychainPassword(service: service)
+            else { continue }
+            guard let auth = try? parseClaudeAuth(raw, account: account, service: service) else { continue }
+            if best == nil || claudeAuthIsBetter(auth, than: best!.auth) {
+                best = (raw, auth)
+            }
+        }
+        return best
+    }
+
+    private static func claudeAuthIsBetter(_ candidate: ClaudeAuth, than current: ClaudeAuth) -> Bool {
+        func rank(_ auth: ClaudeAuth) -> Int {
+            if !auth.accessToken.isEmpty, !auth.isExpired { return 3 }
+            if auth.canRefresh { return 2 }
+            if !auth.accessToken.isEmpty { return 1 }
+            return 0
+        }
+        let candidateRank = rank(candidate)
+        let currentRank = rank(current)
+        if candidateRank != currentRank { return candidateRank > currentRank }
+        return (candidate.expiresAtMs ?? 0) > (current.expiresAtMs ?? 0)
+    }
+
+    private static func claudeCredentialServices() -> [String] {
+        if let cached = claudeServicesCache.withLock({ $0 }) {
+            return cached
+        }
+        var names = Set<String>([claudeKeychainService])
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess, let items = result as? [[String: Any]] {
+            for item in items {
+                guard let service = item[kSecAttrService as String] as? String else { continue }
+                if service == claudeKeychainService || service.hasPrefix("Claude Code-credentials-") {
+                    names.insert(service)
+                }
+            }
+        }
+        if names.count == 1, let dump = securityRun(["dump-keychain"]) {
+            for line in dump.split(separator: "\n") where line.contains("Claude Code-credentials") {
+                guard let range = line.range(of: "Claude Code-credentials") else { continue }
+                let tail = line[range.lowerBound...]
+                let name = tail.prefix { $0 != "\"" }
+                if !name.isEmpty {
+                    names.insert(String(name))
+                }
+            }
+        }
+        let list = names.sorted()
+        claudeServicesCache.withLock { $0 = list }
+        return list
     }
 
     static func claudeAccessToken() throws -> String {
@@ -326,6 +389,7 @@ enum CredentialReaders {
                    let object = try? JSONFlex.object(from: data),
                    (JSONFlex.string(object["error"]) ?? "").contains("invalid_grant") {
                     sawRejectedGrant = true
+                    claudeRefreshRejected.withLock { $0 = true }
                     continue
                 }
                 sawNetworkFailure = true

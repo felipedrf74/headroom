@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 — 2026-09-23
+
+### Fixes
+- Claude Sign In no longer asks you to install Claude when the `claude` shim is missing. Headroom uses the newest installed CLI under `~/.local/share/claude/versions` or Claude Desktop’s bundled `claude`.
+- Claude login is also read from Keychain items named `Claude Code-credentials-…`, not only the unsuffixed item.
+
 ## 1.2.1 — 2026-09-12
 
 ### Fixes

@@ -99,9 +99,15 @@ PLIST
 }
 
 build_with_xcode() {
-  local developer="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
-  if [[ ! -d "$developer" ]]; then
-    return 1
+  local developer="${DEVELOPER_DIR:-}"
+  if [[ -z "$developer" || ! -d "$developer" ]]; then
+    if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+      developer="/Applications/Xcode.app/Contents/Developer"
+    elif [[ -d /Applications/Xcode-beta.app/Contents/Developer ]]; then
+      developer="/Applications/Xcode-beta.app/Contents/Developer"
+    else
+      return 1
+    fi
   fi
   export DEVELOPER_DIR="$developer"
   if ! command -v xcodebuild >/dev/null 2>&1; then

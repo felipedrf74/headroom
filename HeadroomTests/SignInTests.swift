@@ -54,6 +54,28 @@ final class SignInTests: XCTestCase {
         XCTAssertEqual(decoded!.timeIntervalSince1970, date.timeIntervalSince1970, accuracy: 1)
     }
 
+    func testResolveClaudeUsesNewestVersionWhenShimIsMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let versions = root.appendingPathComponent("versions", isDirectory: true)
+        let desktop = root.appendingPathComponent("claude-code", isDirectory: true)
+        try FileManager.default.createDirectory(at: versions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let older = versions.appendingPathComponent("2.1.259")
+        let newer = desktop.appendingPathComponent("2.1.280/claude.app/Contents/MacOS/claude")
+        try FileManager.default.createDirectory(at: newer.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let macho = Data([0xCF, 0xFA, 0xED, 0xFE])
+        FileManager.default.createFile(atPath: older.path, contents: macho, attributes: [.posixPermissions: 0o755])
+        FileManager.default.createFile(atPath: newer.path, contents: macho, attributes: [.posixPermissions: 0o755])
+
+        let resolved = Tooling.resolveClaude(
+            extraDirectories: [root],
+            versionRoots: [versions, desktop]
+        )
+        XCTAssertEqual(resolved?.resolvingSymlinksInPath().path, newer.resolvingSymlinksInPath().path)
+    }
+
     func testProviderLoginMetadata() {
         XCTAssertEqual(Provider.grok.cliExecutable, "grok")
         XCTAssertEqual(Provider.claude.loginArguments, ["auth", "login", "--claudeai"])

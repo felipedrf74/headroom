@@ -65,7 +65,7 @@ final class SignInCoordinator {
             }
             Tooling.openApplication(app)
         case .grok, .claude, .openai:
-            guard let executable = provider.cliExecutable.flatMap({ Tooling.resolve($0) }) else {
+            guard let executable = Tooling.resolveProviderCLI(provider) else {
                 phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
                 return
             }

@@ -24,6 +24,46 @@ enum Tooling {
         return parts.joined(separator: ":")
     }
 
+    static func resolveProviderCLI(_ provider: Provider, extraDirectories: [URL] = [], claudeVersionRoots: [URL]? = nil) -> URL? {
+        switch provider {
+        case .claude:
+            resolveClaude(extraDirectories: extraDirectories, versionRoots: claudeVersionRoots)
+        default:
+            provider.cliExecutable.flatMap { resolve($0, extraDirectories: extraDirectories) }
+        }
+    }
+
+    static func resolveClaude(extraDirectories: [URL] = [], versionRoots: [URL]? = nil) -> URL? {
+        if let direct = resolve("claude", extraDirectories: extraDirectories) {
+            return direct
+        }
+        let roots = versionRoots ?? defaultClaudeVersionRoots()
+        let fileManager = FileManager.default
+        var best: (parts: [Int], url: URL)?
+        for root in roots {
+            guard let children = try? fileManager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for child in children {
+                let version = child.lastPathComponent
+                let candidates = [
+                    child,
+                    child.appendingPathComponent("claude.app/Contents/MacOS/claude"),
+                ]
+                for url in candidates where isMacExecutable(url) {
+                    let parts = versionParts(version)
+                    if let best, !versionIsNewer(parts, than: best.parts) {
+                        continue
+                    }
+                    best = (parts, url)
+                }
+            }
+        }
+        return best?.url
+    }
+
     static func resolve(_ name: String, extraDirectories: [URL] = []) -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var directories = extraDirectories
@@ -64,6 +104,40 @@ enum Tooling {
             }
         }
         return nil
+    }
+
+    private static func defaultClaudeVersionRoots() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home.appendingPathComponent(".local/share/claude/versions", isDirectory: true),
+            home.appendingPathComponent("Library/Application Support/Claude/claude-code", isDirectory: true),
+        ]
+    }
+
+    private static func versionParts(_ name: String) -> [Int] {
+        name.split(separator: ".").map { Int($0) ?? 0 }
+    }
+
+    private static func versionIsNewer(_ candidate: [Int], than current: [Int]) -> Bool {
+        let count = max(candidate.count, current.count)
+        for index in 0..<count {
+            let left = index < candidate.count ? candidate[index] : 0
+            let right = index < current.count ? current[index] : 0
+            if left != right { return left > right }
+        }
+        return false
+    }
+
+    private static func isMacExecutable(_ url: URL) -> Bool {
+        let fileManager = FileManager.default
+        guard fileManager.isExecutableFile(atPath: url.path) else { return false }
+        guard let handle = FileHandle(forReadingAtPath: url.path) else { return false }
+        defer { try? handle.close() }
+        let magic = handle.readData(ofLength: 4)
+        if magic.count >= 4, magic[0] == 0x7F, magic[1] == 0x45, magic[2] == 0x4C, magic[3] == 0x46 {
+            return false
+        }
+        return true
     }
 
     static func open(_ url: URL) {

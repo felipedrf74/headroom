@@ -63,7 +63,7 @@ Protocol `ProviderClient.fetch() async -> Result<QuotaSnapshot, ProviderError>`.
 
 Timeout 8s. 401/403 → expired. Independent last-good cache in `~/Library/Application Support/Headroom/`. Coalesce overlapping refreshes. Persist the snapshot cache once per cycle. Reuse the Cursor token for Grok Bot within 20s. Reuse a non-expired Claude keychain read.
 
-Signed-out cards show a **Sign In** button. Settings → Accounts shows connection status. Turning a provider off does not log the user out of that provider. If a session is already usable, Sign In finishes immediately instead of waiting. A Claude Keychain item with an expired refresh token is not usable — Sign In runs `claude auth logout` then `claude auth login`. Network timeouts stay unreachable (last good reading), not expired.
+Signed-out cards show a **Sign In** button. Settings → Accounts shows connection status. Turning a provider off does not log the user out of that provider. If a session is already usable, Sign In finishes immediately instead of waiting. A Claude Keychain item with an expired refresh token is not usable — Sign In runs `claude auth logout` then `claude auth login`. The CLI is `claude` on PATH, otherwise the newest binary in `~/.local/share/claude/versions` or Claude Desktop’s bundled `claude`. Keychain services `Claude Code-credentials` and `Claude Code-credentials-*` are both read. Network timeouts stay unreachable (last good reading), not expired.
 
 Popover icons load through `HeadroomImage` (`NSImage` from the asset catalog or loose `Resources` PNGs). SwiftUI `Image("name")` alone misses files that are not in an `.car`. Menu-bar glyphs fall back to Canvas marks if the PNG is missing. Meter fill is clipped to the track capsule; 0% used draws no fill.
 
