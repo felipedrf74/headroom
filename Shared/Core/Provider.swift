@@ -44,6 +44,8 @@ struct ProviderDescriptor: Sendable {
     var menuGlyphName: String?
     var signInHint: String
     var expiredHint: String
+    /// Checks closer together than this are skipped, even when forced (rate-limited endpoints).
+    var minimumInterval: TimeInterval = 0
 }
 
 extension Provider {
@@ -87,7 +89,9 @@ extension Provider {
                 assetName: "ProviderClaude",
                 signInHint: "Sign in with claude login to see usage.",
                 // Claude Code owns its session; Tokenroom never refreshes it.
-                expiredHint: "Session expired. Run claude once to refresh it."
+                expiredHint: "Session expired. Run claude once to refresh it.",
+                // The usage endpoint answers 429 to more than about one call every few minutes.
+                minimumInterval: 5 * 60
             )
         case .openai:
             ProviderDescriptor(
@@ -128,4 +132,5 @@ extension Provider {
     var menuGlyphName: String? { descriptor.menuGlyphName }
     var signInHint: String { descriptor.signInHint }
     var expiredHint: String { descriptor.expiredHint }
+    var minimumInterval: TimeInterval { descriptor.minimumInterval }
 }

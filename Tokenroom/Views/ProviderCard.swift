@@ -128,6 +128,9 @@ struct ProviderCard: View {
         ForEach(extraWindows(snapshot)) { window in
             caption(windowCaption(window))
         }
+        if snapshot.source == "bridge" {
+            caption("via Claude Code · \(RelativeTime.ago(snapshot.fetchedAt))")
+        }
         if let banked = snapshot.banked {
             caption(Self.bankedText(banked))
         }

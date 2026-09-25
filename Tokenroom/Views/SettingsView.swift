@@ -20,6 +20,10 @@ struct SettingsView: View {
                             }
                         }
                         accountActions(provider)
+                        if provider == .claude {
+                            ClaudeBridgeRow()
+                                .padding(.leading, 28)
+                        }
                     }
                     .padding(.vertical, 2)
                 }
@@ -138,6 +142,45 @@ private struct RelaySettingsSection: View {
             Text("iPhone & Apple Watch")
         } footer: {
             Text("Only percentages, reset times, window labels, and plan names go to your private iCloud. Tokens never leave this Mac.")
+        }
+    }
+}
+
+/// Opt-in: read Claude usage from Claude Code's own status line.
+private struct ClaudeBridgeRow: View {
+    @State private var isOn = ClaudeStatusLineBridge.standard.isInstalled
+    @State private var message: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Read usage from Claude Code's status line", isOn: Binding(
+                get: { isOn },
+                set: { apply($0) }
+            ))
+            .toggleStyle(.checkbox)
+            Text(message ?? "Keeps Claude usage current without Claude's login. Adds a status line command to ~/.claude/settings.json (after a backup) and runs any status line you already have.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func apply(_ enable: Bool) {
+        let bridge = ClaudeStatusLineBridge.standard
+        do {
+            if enable {
+                try bridge.install()
+            } else {
+                try bridge.uninstall()
+            }
+            isOn = bridge.isInstalled
+            message = nil
+        } catch ClaudeStatusLineBridge.BridgeError.invalidSettings {
+            isOn = bridge.isInstalled
+            message = "Couldn't change ~/.claude/settings.json: it isn't valid JSON. Fix it, then try again."
+        } catch {
+            isOn = bridge.isInstalled
+            message = "Couldn't change ~/.claude/settings.json."
         }
     }
 }

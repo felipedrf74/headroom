@@ -230,9 +230,9 @@ final class FoundationTests: XCTestCase {
 
     @MainActor
     func testExpiredSessionKeepsLastReadingFaded() async throws {
-        let client = ScriptedClient(provider: .claude, results: [
-            .success(snapshot(.claude, used: 63)),
-            .failure(.expired(Provider.claude.expiredHint)),
+        let client = ScriptedClient(provider: .cursor, results: [
+            .success(snapshot(.cursor, used: 63)),
+            .failure(.expired(Provider.cursor.expiredHint)),
         ])
         let store = QuotaStore(
             settings: AppSettings(defaults: makeDefaults()),
@@ -242,13 +242,26 @@ final class FoundationTests: XCTestCase {
         await store.refresh(force: true)
         await store.refresh(force: true)
 
-        guard case .expired(_, let cached?) = store.statuses[.claude] else {
-            return XCTFail("Expected an expired status with the last reading, got \(String(describing: store.statuses[.claude]))")
+        guard case .expired(_, let cached?) = store.statuses[.cursor] else {
+            return XCTFail("Expected an expired status with the last reading, got \(String(describing: store.statuses[.cursor]))")
         }
         XCTAssertEqual(cached.usedPercent, 63)
-        let meter = try XCTUnwrap(store.menuMeters.first { $0.provider == .claude })
+        let meter = try XCTUnwrap(store.menuMeters.first { $0.provider == .cursor })
         XCTAssertTrue(meter.isStale)
         XCTAssertEqual(meter.valueText, "63")
+    }
+
+    @MainActor
+    func testClaudeIsNotAskedTwiceWithinItsMinimumInterval() async throws {
+        let client = ScriptedClient(provider: .claude, results: [.success(snapshot(.claude))])
+        let store = QuotaStore(
+            settings: AppSettings(defaults: makeDefaults()),
+            clients: [client],
+            cache: SnapshotCache(directory: try makeFolder())
+        )
+        await store.refresh(force: true)
+        await store.refresh(force: true)
+        XCTAssertEqual(client.calls, 1, "Claude's usage endpoint allows about one call every few minutes")
     }
 
     @MainActor

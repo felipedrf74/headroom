@@ -131,6 +131,7 @@ final class QuotaStore {
             guard settings.isEnabled(provider) else { return false }
             // A provider that answered 429 is left alone until its Retry-After passes.
             if let until = rateLimitedUntil[provider], until > now { return false }
+            if let last = checkedAt[provider], now.timeIntervalSince(last) < provider.minimumInterval { return false }
             return true
         }
         await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in

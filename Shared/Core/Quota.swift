@@ -50,6 +50,9 @@ struct QuotaSnapshot: Equatable, Codable, Sendable {
     var banked: BankedResets? = nil
     /// Paid usage beyond the plan (e.g. Codex credits, Claude extra usage).
     var extra: ExtraUsage? = nil
+    /// Where the reading came from when it isn't the provider's usage call, e.g. "bridge"
+    /// for Claude Code's status line.
+    var source: String? = nil
 
     var remainingPercent: Double {
         max(0, min(100, 100 - usedPercent))
