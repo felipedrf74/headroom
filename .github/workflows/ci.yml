@@ -20,12 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The iPhone app calls iOS 27 APIs behind availability checks, so it needs the Xcode 27 SDKs.
-      - name: Select Xcode 27
+      # The newest Xcode on the image. Xcode 27 adds iOS 27 APIs the app uses when available;
+      # Xcode 26 builds skip them.
+      - name: Select Xcode
         run: |
-          xcode="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          xcode="$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | sort -V | tail -1)"
           if [[ -z "$xcode" ]]; then
-            echo "::error::This runner image has no Xcode 27. Installed: $(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
+            echo "::error::This runner image has no Xcode 26 or later."
             exit 1
           fi
           sudo xcode-select -s "$xcode"

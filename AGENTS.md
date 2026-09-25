@@ -28,4 +28,4 @@ xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'pla
 xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile -destination 'generic/platform=iOS Simulator'
 ```
 
-Shared logic (relay, alerts, ranking, parsers) is tested on the Mac. The last command also builds the widgets, the Watch app, and its complications. CI (`.github/workflows/ci.yml`) runs all three on Xcode 27.
+Shared logic (relay, alerts, ranking, parsers) is tested on the Mac. The last command also builds the widgets, the Watch app, and its complications. CI (`.github/workflows/ci.yml`) runs all three on the newest Xcode on the runner (26 or 27).
