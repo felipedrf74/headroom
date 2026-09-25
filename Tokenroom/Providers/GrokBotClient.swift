@@ -24,7 +24,8 @@ enum GrokBotParser {
                     kind: .weekly,
                     title: "Weekly",
                     usedPercent: used,
-                    resetsAt: resetsAt
+                    resetsAt: resetsAt,
+                    startsAt: JSONFlex.date(root["currentPeriodStart"])
                 ),
             ],
             planLabel: plan

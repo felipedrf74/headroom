@@ -1,7 +1,7 @@
 import Foundation
 
 struct SnapshotCache: Sendable {
-    private let directory: URL
+    let directory: URL
 
     init(directory: URL? = nil) {
         self.directory = directory ?? Self.defaultDirectory

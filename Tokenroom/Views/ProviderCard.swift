@@ -5,6 +5,8 @@ struct ProviderCard: View {
     var status: ProviderStatus
     /// Last successful check; stale captions use it instead of when the value first appeared.
     var checkedAt: Date?
+    /// Shown only when it matters: ahead of pace or limit reached.
+    var pace: Pace?
     var signInPhase: SignInCoordinator.Phase = .idle
     var onSignIn: () -> Void = {}
     var onCancelSignIn: () -> Void = {}
@@ -117,6 +119,12 @@ struct ProviderCard: View {
             isStale: stale
         )
         caption(primaryCaption(snapshot))
+        if !stale, let pace, pace.verdict == .ahead || pace.verdict == .limitReached {
+            Text(pace.caption())
+                .font(.system(size: TokenroomTokens.captionSize, weight: .medium))
+                .foregroundStyle(paceColor(pace.severity))
+                .fixedSize(horizontal: false, vertical: true)
+        }
         ForEach(extraWindows(snapshot)) { window in
             caption(windowCaption(window))
         }
@@ -138,6 +146,14 @@ struct ProviderCard: View {
             Text(percent.map { "\(QuotaStore.percentText($0))%" } ?? "—")
                 .font(.system(size: TokenroomTokens.popoverPercentSize, weight: .medium).monospacedDigit())
                 .foregroundStyle(TokenroomTokens.ink(remaining: remaining, isStale: stale))
+        }
+    }
+
+    private func paceColor(_ severity: Pace.Severity) -> Color {
+        switch severity {
+        case .critical: TokenroomTokens.critical
+        case .tight: TokenroomTokens.tight
+        case .watch, .none: Color.secondary
         }
     }
 

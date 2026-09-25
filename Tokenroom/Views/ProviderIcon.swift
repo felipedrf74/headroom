@@ -6,7 +6,7 @@ struct ProviderIcon: View {
 
     var body: some View {
         Group {
-            if let image = TokenroomImage.named(provider.assetName) {
+            if let image = provider.assetName.flatMap({ TokenroomImage.named($0) }) {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)

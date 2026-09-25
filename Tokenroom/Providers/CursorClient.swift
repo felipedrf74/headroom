@@ -21,13 +21,15 @@ enum CursorParser {
         }
 
         let resetsAt = JSONFlex.date(root["billingCycleEnd"])
+        let startsAt = JSONFlex.date(root["billingCycleStart"])
         var windows = [
             QuotaWindow(
                 id: "cycle",
                 kind: .billingCycle,
                 title: "This cycle",
                 usedPercent: used,
-                resetsAt: resetsAt
+                resetsAt: resetsAt,
+                startsAt: startsAt
             ),
         ]
         if auto != nil {

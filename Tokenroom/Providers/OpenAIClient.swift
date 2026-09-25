@@ -30,7 +30,8 @@ enum OpenAIParser {
                 kind: weekly.limitSeconds >= weekSeconds ? .weekly : .session,
                 title: weekly.limitSeconds >= weekSeconds ? "Weekly" : "Session",
                 usedPercent: weekly.used,
-                resetsAt: weekly.resetsAt
+                resetsAt: weekly.resetsAt,
+                windowSeconds: weekly.limitSeconds > 0 ? weekly.limitSeconds : nil
             ),
         ]
 
@@ -41,7 +42,8 @@ enum OpenAIParser {
                     kind: .session,
                     title: "Session",
                     usedPercent: session.used,
-                    resetsAt: session.resetsAt
+                    resetsAt: session.resetsAt,
+                    windowSeconds: session.limitSeconds > 0 ? session.limitSeconds : nil
                 )
             )
         }

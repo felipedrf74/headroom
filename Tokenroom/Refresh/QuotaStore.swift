@@ -16,6 +16,8 @@ final class QuotaStore {
     let signIn: SignInCoordinator
     /// Sends readings to iCloud for iPhone and Apple Watch. Nil in tests.
     let relay: RelayPublisher?
+    /// A week of hourly usage per window, next to the snapshot cache.
+    let history: HistoryStore
 
     /// How long an expired session keeps showing its last reading (faded).
     static let expiredGrace: TimeInterval = 24 * 60 * 60
@@ -40,6 +42,7 @@ final class QuotaStore {
         self.clients = Dictionary(uniqueKeysWithValues: clients.map { ($0.provider, $0) })
         self.cache = cache
         self.relay = relay
+        self.history = HistoryStore(directory: cache.directory)
         self.showsLegacyNotice = showsLegacyNotice
         self.signIn = SignInCoordinator()
         let cached = cache.load()
@@ -142,8 +145,27 @@ final class QuotaStore {
             }
         }
         persistLiveSnapshots()
+        history.saveIfNeeded()
         isRefreshing = false
         await relay?.publish(relayEnvelope(at: now))
+        let relayed = Provider.allCases.filter { settings.isEnabled($0) }
+        await relay?.publishHistory(history.relayHistory(for: relayed), now: now)
+    }
+
+    /// Pace of a provider's primary window, from its recent readings.
+    func pace(for provider: Provider, now: Date = .now) -> Pace? {
+        let status = statuses[provider] ?? .loading
+        guard let snapshot = status.snapshot, let window = snapshot.windows.first else { return nil }
+        return Pace.evaluate(
+            used: window.usedPercent,
+            kind: window.kind,
+            resetsAt: window.resetsAt,
+            startsAt: window.startsAt,
+            windowSeconds: window.windowSeconds,
+            samples: history.samples(provider: provider, window: window.id),
+            isStale: status.isStale,
+            now: now
+        )
     }
 
     /// Enabled providers as the iPhone and Watch will see them.
@@ -164,7 +186,7 @@ final class QuotaStore {
                 plan: snapshot?.planLabel,
                 primaryWindowID: snapshot?.windows.first?.id,
                 windows: snapshot?.windows.map {
-                    RelayWindow(id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt)
+                    RelayWindow(id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt, periodSec: $0.windowSeconds, startsAt: $0.startsAt)
                 } ?? []
             )
         }
@@ -304,6 +326,7 @@ final class QuotaStore {
         case .success(let snapshot):
             checkedAt[provider] = snapshot.fetchedAt
             rateLimitedUntil[provider] = nil
+            history.record(snapshot)
             if case .live(let old) = statuses[provider], Self.usageEqual(old, snapshot) {
                 return
             }

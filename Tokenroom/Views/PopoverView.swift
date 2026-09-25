@@ -52,6 +52,7 @@ struct PopoverView: View {
                     provider: provider,
                     status: store.statuses[provider] ?? .loading,
                     checkedAt: store.lastChecked(provider),
+                    pace: store.pace(for: provider),
                     signInPhase: store.signIn.phase,
                     onSignIn: { store.signIn.signIn(provider) },
                     onCancelSignIn: { store.signIn.cancel() },

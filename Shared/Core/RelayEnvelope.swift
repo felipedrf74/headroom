@@ -95,4 +95,7 @@ struct RelayWindow: Codable, Equatable, Sendable, Identifiable {
     /// Used percent, 0–100.
     var used: Double
     var resetsAt: Date?
+    /// Window length in seconds, when known; readers need it for pace.
+    var periodSec: Double? = nil
+    var startsAt: Date? = nil
 }

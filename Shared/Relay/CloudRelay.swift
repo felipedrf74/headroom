@@ -5,11 +5,13 @@ import Foundation
 ///
 /// - `Source`: one per collector (a Mac, or an iPhone with API keys). Only that collector writes it,
 ///   so saves never conflict. `payload` is a JSON `RelayEnvelope`.
+/// - `History`: that collector's hourly usage for the last week (`hist-<source>`), sent hourly.
 /// - `Event`: an alert (threshold crossed, test). The iPhone's query subscription turns each new
 ///   one into a visible notification, even when the app isn't running.
 actor CloudRelay {
     enum RecordType {
         static let source = "Source"
+        static let history = "History"
         static let event = "Event"
     }
 
@@ -28,6 +30,13 @@ actor CloudRelay {
     }
 
     static let zoneID = CKRecordZone.ID(zoneName: "Tokenroom", ownerName: CKCurrentUserDefaultName)
+
+    /// Everything readers need from the zone.
+    struct Contents: Sendable {
+        var sources: [Source]
+        /// Keyed by source ID.
+        var histories: [String: RelayHistory]
+    }
 
     struct Source: Sendable, Identifiable {
         var id: String
@@ -71,6 +80,20 @@ actor CloudRelay {
         try await save([record])
     }
 
+    func publishHistory(sourceID: String, history: RelayHistory) async throws {
+        let record = CKRecord(
+            recordType: RecordType.history,
+            recordID: CKRecord.ID(recordName: Self.historyRecordName(for: sourceID), zoneID: Self.zoneID)
+        )
+        record[Field.payload] = try history.encoded()
+        record[Field.schema] = history.v
+        try await save([record])
+    }
+
+    static func historyRecordName(for sourceID: String) -> String {
+        "hist-\(sourceID)"
+    }
+
     /// Record names are deterministic, so two Macs seeing the same crossing create one alert.
     func saveEvent(
         id: String,
@@ -89,26 +112,42 @@ actor CloudRelay {
         try await save([record])
     }
 
-    /// Every source in the zone. A handful of small records, so no change tokens are kept.
-    func sources() async throws -> [Source] {
-        var result: [Source] = []
+    /// Every source and history in the zone. A handful of small records, so no change tokens are kept.
+    func contents() async throws -> Contents {
+        var sources: [Source] = []
+        var histories: [String: RelayHistory] = [:]
         var token: CKServerChangeToken?
         do {
             while true {
                 let changes = try await database.recordZoneChanges(inZoneWith: Self.zoneID, since: token)
                 for (_, modification) in changes.modificationResultsByID {
-                    guard case .success(let change) = modification,
-                          change.record.recordType == RecordType.source
-                    else { continue }
-                    result.append(Self.source(from: change.record))
+                    guard case .success(let change) = modification else { continue }
+                    let record = change.record
+                    switch record.recordType {
+                    case RecordType.source:
+                        sources.append(Self.source(from: record))
+                    case RecordType.history:
+                        let name = record.recordID.recordName
+                        guard name.hasPrefix("hist-"),
+                              let data = record[Field.payload] as? Data,
+                              let history = try? RelayHistory.decode(data)
+                        else { continue }
+                        histories[String(name.dropFirst("hist-".count))] = history
+                    default:
+                        continue
+                    }
                 }
                 token = changes.changeToken
                 if !changes.moreComing { break }
             }
         } catch let error as CKError where error.code == .zoneNotFound {
-            return []
+            return Contents(sources: [], histories: [:])
         }
-        return result
+        return Contents(sources: sources, histories: histories)
+    }
+
+    func sources() async throws -> [Source] {
+        try await contents().sources
     }
 
     func deleteAllData() async throws {

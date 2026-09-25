@@ -31,7 +31,8 @@ enum GrokParser {
                 kind: kind,
                 title: title,
                 usedPercent: usedPercent,
-                resetsAt: resetsAt
+                resetsAt: resetsAt,
+                startsAt: JSONFlex.date(period?["start"])
             ),
         ]
 

@@ -15,7 +15,8 @@ enum ClaudeParser {
                 kind: .weekly,
                 title: "Weekly",
                 usedPercent: used,
-                resetsAt: resetsAt
+                resetsAt: resetsAt,
+                windowSeconds: 7 * 86_400
             ),
         ]
 
@@ -27,7 +28,8 @@ enum ClaudeParser {
                     kind: .session,
                     title: "Session",
                     usedPercent: JSONFlex.clampPercent(sessionUsed),
-                    resetsAt: JSONFlex.date(session["resets_at"])
+                    resetsAt: JSONFlex.date(session["resets_at"]),
+                    windowSeconds: 5 * 3_600
                 )
             )
         }

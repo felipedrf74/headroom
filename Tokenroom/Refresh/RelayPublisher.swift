@@ -60,6 +60,7 @@ final class RelayPublisher {
     private var lastHash: Int?
     private var lastStates: [String: String] = [:]
     private var retryAt: Date?
+    private var lastHistoryHour: Date?
     private let logger = Logger(subsystem: TokenroomIdentity.bundleID, category: "relay")
 
     init(defaults: UserDefaults = .standard, containerIdentifier: String? = RelayAvailability.containerIdentifier) {
@@ -107,6 +108,20 @@ final class RelayPublisher {
             lastSent = now
             retryAt = nil
             state = .sent(now)
+        } catch {
+            handle(error, now: now)
+        }
+    }
+
+    /// Sends the week of hourly history once per hour.
+    func publishHistory(_ history: RelayHistory, now: Date = .now) async {
+        guard let relay, isEnabled, !history.series.isEmpty else { return }
+        if let retryAt, retryAt > now { return }
+        let hour = UsageHistory.hourStart(now)
+        guard lastHistoryHour != hour else { return }
+        do {
+            try await relay.publishHistory(sourceID: sourceID, history: history)
+            lastHistoryHour = hour
         } catch {
             handle(error, now: now)
         }

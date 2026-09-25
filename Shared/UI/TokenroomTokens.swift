@@ -1,11 +1,5 @@
 import SwiftUI
 
-enum TokenroomFormat {
-    static func percentText(_ value: Double) -> String {
-        String(Int(max(0, min(100, value)).rounded()))
-    }
-}
-
 enum TokenroomTokens {
     static let tightRemaining = 25.0
     static let criticalRemaining = 10.0
