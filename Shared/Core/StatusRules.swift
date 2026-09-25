@@ -83,6 +83,22 @@ extension RelayProvider {
     }
 }
 
+extension RelayProvider {
+    /// Live Activities last about 8 hours, so only windows resetting within that are followed.
+    static let followHorizon: TimeInterval = 8 * 3600
+
+    /// The window worth a Live Activity: a session, else the most used window at 80% or more,
+    /// resetting within 8 hours.
+    func windowToFollow(now: Date = .now) -> RelayWindow? {
+        let soon = windows.filter { window in
+            guard window.isMetered, let resetsAt = window.resetsAt else { return false }
+            return resetsAt > now && resetsAt.timeIntervalSince(now) <= Self.followHorizon
+        }
+        return soon.first { $0.windowKind == .session }
+            ?? soon.filter { $0.used >= 80 }.max { $0.used < $1.used }
+    }
+}
+
 extension RelayWindow {
     init(_ window: QuotaWindow) {
         self.init(

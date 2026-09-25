@@ -285,6 +285,8 @@ final class MobileStore {
         readings = output.connected.map { Reading($0, now: now) }
         disconnected = output.disconnected.map { Reading($0, now: now) }
         saveCache(ReadingCache(savedAt: now, isSample: false, items: output.connected))
+        let providers = output.connected.map(\.provider)
+        Task { await LiveActivities.update(with: providers, now: now) }
     }
 
     /// Widgets redraw from this. When nothing they'd draw changed, only the save time moves, so

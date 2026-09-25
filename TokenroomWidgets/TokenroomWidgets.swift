@@ -5,6 +5,8 @@ import WidgetKit
 struct TokenroomWidgetsBundle: WidgetBundle {
     var body: some Widget {
         UsageWidget()
+        SessionActivityWidget()
+        FollowUsageControl()
     }
 }
 

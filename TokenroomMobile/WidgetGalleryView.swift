@@ -48,6 +48,12 @@ struct WidgetGalleryView: View {
                     widget(.systemMedium, size: CGSize(width: 364, height: 170), mode: .fullColor)
                         .background(.background, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .environment(\.colorScheme, .dark)
+                    if let activity = sampleActivity {
+                        SessionLockScreenView(attributes: activity.attributes, state: activity.state)
+                            .frame(width: 370)
+                            .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .environment(\.colorScheme, .dark)
+                    }
                 } else {
                     ForEach(homeSizes, id: \.family) { item in
                         widget(item.family, size: item.size, mode: .fullColor)
@@ -59,6 +65,19 @@ struct WidgetGalleryView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color.gray.opacity(0.25))
+    }
+
+    /// The first provider with a window worth following, as its Live Activity would show it.
+    private var sampleActivity: (attributes: SessionActivityAttributes, state: SessionActivityAttributes.ContentState)? {
+        for item in cache.items {
+            let provider = item.provider
+            guard let window = LiveActivities.candidate(in: provider, now: date), let resetsAt = window.resetsAt else { continue }
+            return (
+                SessionActivityAttributes(providerID: provider.id, providerName: provider.name, shortName: provider.shortName, monogram: provider.monogram, tint: provider.tint, windowID: window.id, windowTitle: window.title),
+                SessionActivityAttributes.ContentState(used: window.used, resetsAt: resetsAt, isStale: !provider.isLive)
+            )
+        }
+        return nil
     }
 
     private func widget(_ family: WidgetFamily, size: CGSize, mode: WidgetRenderingMode) -> some View {

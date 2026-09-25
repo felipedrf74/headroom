@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ProviderDetailView: View {
     var reading: MobileStore.Reading
+    @State private var isFollowing = false
+    @State private var followError: String?
 
     private var provider: RelayProvider { reading.provider }
 
@@ -10,6 +12,15 @@ struct ProviderDetailView: View {
         List {
             Section {
                 header
+            }
+            if let window = LiveActivities.candidate(in: provider) {
+                Section {
+                    Button(isFollowing ? "Stop Following" : "Follow on Lock Screen", systemImage: isFollowing ? "xmark.circle" : "gauge.with.dots.needle.67percent") {
+                        toggleFollowing(window)
+                    }
+                } footer: {
+                    Text(followError ?? "Shows \(window.title.lowercased()) on the Lock Screen and in the Dynamic Island until it resets.")
+                }
             }
             ForEach(provider.windows) { window in
                 Section(window.title) {
@@ -45,6 +56,29 @@ struct ProviderDetailView: View {
         }
         .navigationTitle(provider.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            isFollowing = LiveActivities.activity(for: provider.id) != nil
+        }
+    }
+
+    private func toggleFollowing(_ window: RelayWindow) {
+        if isFollowing {
+            Task {
+                await LiveActivities.stop(provider.id)
+                isFollowing = false
+            }
+            return
+        }
+        guard LiveActivities.isEnabled else {
+            followError = "Live Activities are off for Tokenroom. Turn them on in Settings › Tokenroom."
+            return
+        }
+        do {
+            isFollowing = try LiveActivities.start(provider, window: window)
+            followError = nil
+        } catch {
+            followError = "Couldn't start the Live Activity."
+        }
     }
 
     private var header: some View {
