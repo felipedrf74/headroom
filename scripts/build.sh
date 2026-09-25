@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DERIVED="${DERIVED_DATA_PATH:-$HOME/Library/Developer/Xcode/DerivedData/Headroom}"
+DERIVED="${DERIVED_DATA_PATH:-$HOME/Library/Developer/Xcode/DerivedData/Tokenroom}"
 CONFIG="${1:-Release}"
 ARCH="$(uname -m)"
 
@@ -10,8 +10,8 @@ mkdir -p "$HOME/Applications"
 
 install_app() {
   local app="$1"
-  local user_dest="$HOME/Applications/Headroom.app"
-  local system_dest="/Applications/Headroom.app"
+  local user_dest="$HOME/Applications/Tokenroom.app"
+  local system_dest="/Applications/Tokenroom.app"
 
   rm -rf "$user_dest"
   cp -R "$app" "$user_dest"
@@ -26,12 +26,12 @@ install_app() {
 
 assemble_resources() {
   local app="$1"
-  local assets="$ROOT/Headroom/Assets.xcassets"
+  local assets="$ROOT/Tokenroom/Assets.xcassets"
   local res="$app/Contents/Resources"
   mkdir -p "$res"
 
   local iconset
-  iconset="$(mktemp -d /tmp/HeadroomIcon.XXXXXX)"
+  iconset="$(mktemp -d /tmp/TokenroomIcon.XXXXXX)"
   cp "$assets/AppIcon.appiconset/"*.png "$iconset/"
   mv "$iconset" "$iconset.iconset"
   iconutil -c icns "$iconset.iconset" -o "$res/AppIcon.icns"
@@ -66,17 +66,17 @@ write_info_plist() {
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Headroom</string>
+	<string>Tokenroom</string>
 	<key>CFBundleExecutable</key>
-	<string>Headroom</string>
+	<string>Tokenroom</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>app.headroom.mac</string>
+	<string>app.tokenroom.mac</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Headroom</string>
+	<string>Tokenroom</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -90,7 +90,7 @@ write_info_plist() {
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Headroom contributors</string>
+	<string>Tokenroom contributors</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
@@ -115,26 +115,26 @@ build_with_xcode() {
   fi
   mkdir -p "$DERIVED"
   xcodebuild \
-    -project "$ROOT/Headroom.xcodeproj" \
-    -scheme Headroom \
+    -project "$ROOT/Tokenroom.xcodeproj" \
+    -scheme Tokenroom \
     -configuration "$CONFIG" \
     -derivedDataPath "$DERIVED" \
     -destination "platform=macOS,arch=$ARCH" \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_ALLOWED=YES \
     build
-  local app="$DERIVED/Build/Products/$CONFIG/Headroom.app"
+  local app="$DERIVED/Build/Products/$CONFIG/Tokenroom.app"
   assemble_resources "$app"
-  codesign --force --sign - --entitlements "$ROOT/Headroom/Headroom.entitlements" --options runtime "$app"
+  codesign --force --sign - --entitlements "$ROOT/Tokenroom/Tokenroom.entitlements" --options runtime "$app"
   install_app "$app"
 }
 
 build_with_swiftc() {
   local sdk
   sdk="$(xcrun --sdk macosx --show-sdk-path)"
-  local build="/tmp/headroom-build"
+  local build="/tmp/tokenroom-build"
   rm -rf "$build"
-  mkdir -p "$build/Headroom.app/Contents/MacOS"
+  mkdir -p "$build/Tokenroom.app/Contents/MacOS"
 
   echo "Xcode not available; building with swiftc and $sdk"
   # shellcheck disable=SC2046
@@ -145,15 +145,15 @@ build_with_swiftc() {
     -O \
     -swift-version 6 \
     -lsqlite3 \
-    -o "$build/Headroom.app/Contents/MacOS/Headroom" \
-    $(find "$ROOT/Headroom" -name '*.swift' | sort)
+    -o "$build/Tokenroom.app/Contents/MacOS/Tokenroom" \
+    $(find "$ROOT/Tokenroom" -name '*.swift' | sort)
 
-  chmod +x "$build/Headroom.app/Contents/MacOS/Headroom"
-  echo -n 'APPL????' > "$build/Headroom.app/Contents/PkgInfo"
-  write_info_plist "$build/Headroom.app/Contents/Info.plist"
-  assemble_resources "$build/Headroom.app"
-  codesign --force --sign - --entitlements "$ROOT/Headroom/Headroom.entitlements" --options runtime "$build/Headroom.app"
-  install_app "$build/Headroom.app"
+  chmod +x "$build/Tokenroom.app/Contents/MacOS/Tokenroom"
+  echo -n 'APPL????' > "$build/Tokenroom.app/Contents/PkgInfo"
+  write_info_plist "$build/Tokenroom.app/Contents/Info.plist"
+  assemble_resources "$build/Tokenroom.app"
+  codesign --force --sign - --entitlements "$ROOT/Tokenroom/Tokenroom.entitlements" --options runtime "$build/Tokenroom.app"
+  install_app "$build/Tokenroom.app"
 }
 
 if ! build_with_xcode; then

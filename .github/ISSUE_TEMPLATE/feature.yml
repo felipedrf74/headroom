@@ -1,5 +1,5 @@
 name: Idea
-description: A change to Headroom
+description: A change to Tokenroom
 title: "[Idea] "
 labels: ["enhancement"]
 body:
@@ -7,7 +7,7 @@ body:
     id: idea
     attributes:
       label: Idea
-      description: What should Headroom do that it does not do now?
+      description: What should Tokenroom do that it does not do now?
     validations:
       required: true
   - type: textarea
