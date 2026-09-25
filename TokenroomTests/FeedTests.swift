@@ -125,8 +125,54 @@ final class FeedTests: XCTestCase {
         XCTAssertTrue(FeedParser.items(from: Data(count: FeedParser.sizeLimit + 1), source: claudeCode).isEmpty)
     }
 
+    // MARK: Fetching
+
+    func testConditionalGetsKeepCachedItemsOn304() async throws {
+        defer {
+            TokenroomHTTP.overrideSession(nil)
+            StubURLProtocol.reset()
+        }
+        let rss = Data("<rss version=\"2.0\"><channel><item><title>2.1.282</title><link>https://example.com/a</link><pubDate>Thu, 24 Sep 2026 18:46:38 GMT</pubDate></item></channel></rss>".utf8)
+        StubURLProtocol.handler = { request in
+            request.value(forHTTPHeaderField: "If-None-Match") == "\"v1\"" ? (304, Data()) : (200, rss)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubETagProtocol.self]
+        TokenroomHTTP.overrideSession(URLSession(configuration: configuration))
+
+        let source = FeedSource(id: "claude-code", name: "Claude Code", url: URL(string: "https://example.com/rss.xml")!)
+        let now = utc(2026, 9, 25, 12)
+        let first = await NewsFetcher.refresh(NewsCache(), sources: [source], following: [], now: now)
+        XCTAssertEqual(first.cache.items["claude-code"]?.map(\.title), ["2.1.282"])
+        XCTAssertEqual(first.cache.validators[source.url.absoluteString]?.etag, "\"v1\"")
+
+        let second = await NewsFetcher.refresh(first.cache, sources: [source], following: [], maxAge: 0, now: now.addingTimeInterval(60))
+        XCTAssertEqual(StubURLProtocol.requests.last?.value(forHTTPHeaderField: "If-None-Match"), "\"v1\"")
+        XCTAssertEqual(second.cache.items["claude-code"]?.map(\.title), ["2.1.282"], "A 304 keeps what was cached")
+        XCTAssertEqual(second.cache.announcementsFetchedAt, now.addingTimeInterval(60))
+        XCTAssertFalse(NewsFetcher.isDue(second.cache.announcementsFetchedAt, interval: NewsFetcher.announcementInterval, now: now.addingTimeInterval(3600)))
+    }
+
     func testCatalogIsHTTPSAndUnique() {
         XCTAssertEqual(Set(FeedSource.catalog.map(\.id)).count, FeedSource.catalog.count)
         XCTAssertTrue(FeedSource.catalog.allSatisfy { $0.url.scheme == "https" })
     }
+}
+
+/// Like StubURLProtocol, with an ETag on every 200.
+final class StubETagProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        StubURLProtocol.requests.append(request)
+        let (status, data) = StubURLProtocol.handler?(request) ?? (404, Data())
+        let headers = status == 200 ? ["ETag": "\"v1\""] : [:]
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

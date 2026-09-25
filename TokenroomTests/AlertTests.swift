@@ -100,6 +100,21 @@ final class AlertTests: XCTestCase {
         XCTAssertFalse(preferences.isQuiet(at: at(3)))
     }
 
+    func testPreferencesFromAnOlderBuildKeepTheirChoices() throws {
+        let saved = Data(#"{"thresholds":[95],"quietHours":false}"#.utf8)
+        let preferences = try JSONDecoder().decode(AlertPreferences.self, from: saved)
+        XCTAssertEqual(preferences.thresholds, [95])
+        XCTAssertFalse(preferences.quietHours)
+        XCTAssertTrue(preferences.resets, "Keys an older build didn't write take their defaults")
+        XCTAssertTrue(preferences.newModels)
+    }
+
+    func testQuietHoursEndForHeldNotifications() {
+        let late = Calendar.gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 23, minute: 30))!
+        XCTAssertEqual(preferences.quietEnd(after: late), Calendar.gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: 8)))
+        XCTAssertNil(preferences.quietEnd(after: now), "Noon isn't quiet")
+    }
+
     func testLedgerSendsEachAlertOnceAndDevicesAgreeOnIDs() {
         var mac = AlertLedger()
         var otherMac = AlertLedger()
