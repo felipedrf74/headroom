@@ -27,6 +27,8 @@ final class QuotaStore {
     private let clients: [Provider: any ProviderClient]
     private let cache: SnapshotCache
     private var rateLimitedUntil: [Provider: Date] = [:]
+    /// Readings before a budget was applied, so a new budget shows at once.
+    private var rawSnapshots: [Provider: QuotaSnapshot] = [:]
     private var loopTask: Task<Void, Never>?
     private var wakeTask: Task<Void, Never>?
     private var inFlight: Task<Void, Never>?
@@ -316,6 +318,14 @@ final class QuotaStore {
         checkedAt[provider] ?? statuses[provider]?.snapshot?.fetchedAt
     }
 
+    /// Re-applies the provider's budget to its last reading.
+    func budgetDidChange(for provider: Provider) {
+        guard let raw = rawSnapshots[provider], case .live = statuses[provider] else { return }
+        statuses[provider] = .live(raw.applyingBudget(settings.budget(for: provider)))
+        snapshotsDirty = true
+        persistLiveSnapshots()
+    }
+
     func dismissLegacyNotice() {
         LegacyMigration.dismissNotice()
         showsLegacyNotice = false
@@ -360,7 +370,9 @@ final class QuotaStore {
 
     private func apply(provider: Provider, result: Result<QuotaSnapshot, ProviderError>, now: Date = .now) {
         switch result {
-        case .success(let snapshot):
+        case .success(let raw):
+            rawSnapshots[provider] = raw
+            let snapshot = raw.applyingBudget(settings.budget(for: provider))
             checkedAt[provider] = snapshot.fetchedAt
             rateLimitedUntil[provider] = nil
             history.record(snapshot)

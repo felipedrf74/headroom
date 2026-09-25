@@ -66,10 +66,14 @@ enum TokenroomHTTP {
         return formatter.date(from: value)
     }
 
-    static func get(_ url: URL, token: String, headers: [String: String] = [:], provider: Provider) async throws -> Data {
+    /// - Parameter token: sent as `Authorization: Bearer`; pass nil for APIs that take the key in
+    ///   another header (Anthropic's `x-api-key`).
+    static func get(_ url: URL, token: String?, headers: [String: String] = [:], provider: Provider) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)

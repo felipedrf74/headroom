@@ -1,0 +1,2 @@
+{ "coreInvoice": { "amountBeforeVat": "30000", "vatCost": "1250", "amountAfterVat": "31250", "prepaidCreditsUsed": { "val": "0" } },
+  "effectiveSpendingLimit": "100000" }

@@ -1,0 +1,2 @@
+{ "changes": [ { "amount": { "val": "-5000" }, "changeOrigin": "PURCHASE" }, { "amount": { "val": "2500" }, "changeOrigin": "SPEND" } ],
+  "total": { "val": "-2500" } }

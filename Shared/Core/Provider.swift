@@ -12,6 +12,9 @@ enum Provider: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case deepseek
     case moonshot
     case vercelGateway
+    case openaiOrg
+    case anthropicOrg
+    case xaiOrg
 
     var id: String { rawValue }
 
@@ -184,6 +187,44 @@ extension Provider {
                 signInHint: "Add an AI Gateway API key to see your credits.",
                 expiredHint: "Couldn't use this AI Gateway key. Add a new one in Settings.",
                 key: KeySpec(createURL: URL(string: "https://vercel.com/dashboard/ai-gateway/api-keys")!)
+            )
+        case .openaiOrg:
+            ProviderDescriptor(
+                displayName: "OpenAI API",
+                shortName: "OpenAI API",
+                letter: "O",
+                monogram: "OA",
+                tintHex: "#0E7C66",
+                category: .orgSpend,
+                signInHint: "Add an OpenAI Admin key to see this month's spend.",
+                expiredHint: "Couldn't use this key. It needs to be an OpenAI Admin key.",
+                key: KeySpec(label: "Admin key", createURL: URL(string: "https://platform.openai.com/settings/organization/admin-keys")!, prefixHint: "sk-admin-", isAdmin: true)
+            )
+        case .anthropicOrg:
+            ProviderDescriptor(
+                displayName: "Anthropic API",
+                shortName: "Anthropic API",
+                letter: "A",
+                monogram: "AN",
+                tintHex: "#B85C38",
+                category: .orgSpend,
+                signInHint: "Add an Anthropic Admin key to see this month's spend.",
+                expiredHint: "Couldn't use this key. It needs to be an Anthropic Admin key.",
+                // Cost reports update slowly; polling faster only spends rate limit.
+                minimumInterval: 15 * 60,
+                key: KeySpec(label: "Admin key", createURL: URL(string: "https://console.anthropic.com/settings/admin-keys")!, prefixHint: "sk-ant-admin", isAdmin: true)
+            )
+        case .xaiOrg:
+            ProviderDescriptor(
+                displayName: "xAI API",
+                shortName: "xAI API",
+                letter: "X",
+                monogram: "XA",
+                tintHex: "#3A3A3C",
+                category: .orgSpend,
+                signInHint: "Add an xAI management key to see spend and credits.",
+                expiredHint: "Couldn't use this key. It needs to be an xAI management key.",
+                key: KeySpec(label: "Management key", createURL: URL(string: "https://console.x.ai")!, isAdmin: true)
             )
         }
     }

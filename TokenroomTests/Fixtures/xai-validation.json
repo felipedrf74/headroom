@@ -1,0 +1,2 @@
+{ "apiKeyId": "key-placeholder", "teamId": "team-deprecated", "scope": "SCOPE_TEAM", "scopeId": "team-placeholder",
+  "ownerUserId": "owner-placeholder", "name": "Tokenroom", "acls": ["billing:read"], "createTime": "2026-09-01T00:00:00Z" }

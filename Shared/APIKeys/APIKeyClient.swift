@@ -36,6 +36,8 @@ struct APIKeyClient: ProviderClient {
         case .vercelGateway:
             let data = try await TokenroomHTTP.get(URL(string: "https://ai-gateway.vercel.sh/v1/credits")!, token: key, provider: provider)
             return try VercelGatewayParser.snapshot(from: data)
+        case .openaiOrg, .anthropicOrg, .xaiOrg:
+            return try await orgSnapshot(for: provider, key: key)
         default:
             throw ProviderError.parse
         }

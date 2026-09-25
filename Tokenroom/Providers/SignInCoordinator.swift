@@ -71,7 +71,7 @@ final class SignInCoordinator {
                 return
             }
             Tooling.openApplication(app)
-        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
             phase = .idle
             return
         case .grok, .claude, .openai:

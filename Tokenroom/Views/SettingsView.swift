@@ -67,22 +67,23 @@ private struct ProvidersSettings: View {
             }
 
             Section {
-                ForEach(Provider.allCases.filter(\.usesAPIKey)) { provider in
-                    VStack(alignment: .leading, spacing: 8) {
-                        providerToggle(provider)
-                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
-                            keySheet = provider
-                        } onRemoved: {
-                            store.settings.setEnabled(provider, false)
-                        }
-                        .padding(.leading, 28)
-                    }
-                    .padding(.vertical, 2)
+                ForEach(Provider.allCases.filter { $0.category == .apiBalance }) { provider in
+                    keyedProvider(provider, budgetLabel: "Budget")
                 }
             } header: {
                 Text("Pay as you go")
             } footer: {
-                Text("API keys stay in this Mac's Keychain. They're never synced or sent to your iPhone; only the readings are.")
+                Text("API keys stay in this Mac's Keychain. They're never synced or sent to your iPhone; only the readings are. A budget turns a balance or spend into a meter.")
+            }
+
+            Section {
+                ForEach(Provider.allCases.filter { $0.category == .orgSpend }) { provider in
+                    keyedProvider(provider, budgetLabel: "Monthly budget")
+                }
+            } header: {
+                Text("Organization billing")
+            } footer: {
+                Text("Admin and management keys can change your organization. Tokenroom only reads cost and billing with them. Create a dedicated key you can revoke.")
             }
         }
         .formStyle(.grouped)
@@ -97,6 +98,27 @@ private struct ProvidersSettings: View {
             keySheet = provider
             store.pendingKeyProvider = nil
         }
+    }
+
+    private func keyedProvider(_ provider: Provider, budgetLabel: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            providerToggle(provider)
+            KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                keySheet = provider
+            } onRemoved: {
+                store.settings.setEnabled(provider, false)
+            }
+            .padding(.leading, 28)
+            BudgetField(label: budgetLabel, value: Binding(
+                get: { store.settings.budget(for: provider) },
+                set: { value in
+                    store.settings.setBudget(value, for: provider)
+                    store.budgetDidChange(for: provider)
+                }
+            ))
+            .padding(.leading, 28)
+        }
+        .padding(.vertical, 2)
     }
 
     private func providerToggle(_ provider: Provider) -> some View {
@@ -220,6 +242,24 @@ private struct KeyRow: View {
     }
 }
 
+/// A dollar amount; empty means no budget.
+private struct BudgetField: View {
+    var label: String
+    @Binding var value: Double?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            TextField("None", value: $value, format: .currency(code: "USD"))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+                .frame(width: 110)
+        }
+    }
+}
+
 /// Paste → Test & Save: one call with the key before it's stored.
 private struct AddKeySheet: View {
     var provider: Provider
@@ -231,6 +271,7 @@ private struct AddKeySheet: View {
     @State private var working = false
     @State private var message: String?
     @State private var offerSaveAnyway = false
+    @State private var acknowledgedAdmin = false
 
     init(provider: Provider, keys: APIKeyStore, onSaved: @escaping () -> Void) {
         self.provider = provider
@@ -259,6 +300,18 @@ private struct AddKeySheet: View {
                 Link("Create a key", destination: url)
                     .font(.system(size: 11))
             }
+            if provider.key?.isAdmin == true {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("This is an organization-wide key. It can read and change your organization's settings\(provider == .xaiOrg ? ", billing, and keys" : ""). Tokenroom only reads cost and billing with it, keeps it in this Mac's Keychain, and never sends it to other devices.")
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle("I created a dedicated key I can revoke", isOn: $acknowledgedAdmin)
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 11))
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.orange.opacity(0.12)))
+            }
             Text(message ?? "Tokenroom only reads your balance and usage with this key. It stays in this Mac's Keychain.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -272,7 +325,7 @@ private struct AddKeySheet: View {
                 }
                 Button(working ? "Testing…" : "Test & Save") { test() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || working)
+                    .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || working || (provider.key?.isAdmin == true && !acknowledgedAdmin))
             }
         }
         .padding(20)

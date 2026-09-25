@@ -53,7 +53,7 @@ extension Provider {
                 appBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
                 appNames: ["Cursor"]
             )
-        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
             nil
         }
     }

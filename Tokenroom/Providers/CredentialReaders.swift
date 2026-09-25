@@ -141,7 +141,7 @@ enum CredentialReaders {
             guard let raw = readClaudeRawFromKeychain() else { return nil }
             let checksum = raw.utf8.reduce(into: 0) { sum, byte in sum = sum &+ Int(byte) }
             return "\(raw.count)-\(checksum)"
-        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
             return apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
         }
     }
