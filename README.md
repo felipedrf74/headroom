@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Subscription quota in the macOS menu bar.</strong><br>
-  Grok, Claude, OpenAI, and Cursor — used percent, reset time, on this Mac only.
+  Claude, Codex, Grok, Cursor, Copilot, and 14 more: used percent and reset time, read on this Mac.
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
   <img src="docs/images/hero.png" width="920" alt="Tokenroom menu bar extra and popover">
 </p>
 
-Tokenroom is a menu-bar extra. It does not live in the Dock. It reuses logins you already have. It does not ask for API keys, and it does not keep names, emails, or tokens on disk.
+Tokenroom is a menu-bar extra. It does not live in the Dock. It reuses logins you already have. For pay-as-you-go and organization billing you can add an API key, which stays in your Keychain. It does not keep names, emails, or tokens on disk.
 
 Tokenroom was called Headroom until 2.0. On first launch it brings over Headroom’s settings and last readings; quit Headroom and move it to the Trash afterwards.
 
@@ -32,13 +32,22 @@ Tokenroom was called Headroom until 2.0. On first launch it brings over Headroom
 
 The extra shows **used %** for every provider you turned on.
 
-| Extra | What you see | Sign in with |
+| Provider | What you see | Connect with |
 | --- | --- | --- |
 | Grok Build | Weekly pool | `grok login` |
 | Grok Bot | Weekly pool | Grok Bot app |
 | Claude | 7-day window | `claude login` |
-| OpenAI | Weekly window | `codex login` |
+| OpenAI (Codex) | Weekly window | `codex login` |
 | Cursor | Billing cycle | Cursor app |
+| GitHub Copilot | Monthly requests | `gh auth login` or a Copilot editor extension |
+| Antigravity | Gemini weekly | Antigravity, and `agy` 1.1.11 or later |
+| Devin | Weekly quota | Devin app |
+| Z.ai, MiniMax | Weekly or 5-hour | The key in Claude Code’s settings, or add one |
+| Kimi Code | Weekly | `kimi` login, or add a key |
+| OpenCode Go | Weekly | OpenCode’s login, or add a key |
+| OpenRouter | Key limit, or spend | API key |
+| DeepSeek, Moonshot, Vercel AI Gateway | Balance | API key |
+| OpenAI, Anthropic, and xAI organizations | This month’s spend | Admin key |
 
 Click the extra for reset times, session windows, and sign-in. Claude’s 5-hour session is in the popover only. Cursor is labeled **This cycle**, never Weekly.
 
@@ -51,9 +60,9 @@ Click the extra for reset times, session windows, and sign-in. Claude’s 5-hour
 Each of those tools already knows how much quota you have left. None of them put it next to the clock. Tokenroom does, as tiny percents or iStat-style meters, then gets out of the way.
 
 - **Local-first.** No Tokenroom account, no Tokenroom server, no telemetry.
-- **Your logins.** Sessions stay in `~/.grok`, Keychain, `~/.codex`, and Cursor’s own database.
+- **Your logins.** Sessions stay where each tool keeps them. Tokenroom only reads them.
 - **Independent meters.** One provider failing never blanks the others.
-- **Two looks.** Percents or vertical used-bars. Refresh every 5, 10, 15, or 30 minutes. Launch at login if you want.
+- **Three looks.** Percents, vertical used-bars, or only the highest. Refresh every 5, 10, 15, or 30 minutes. Launch at login if you want.
 
 Numbers in the screenshots are sample data.
 
@@ -77,21 +86,21 @@ The build is ad-hoc signed and **not sandboxed** — it has to read CLI credenti
 ## Sign in
 
 1. Click Tokenroom in the menu bar.
-2. On a provider that isn’t signed in, click **Sign In**.
+2. On a provider that isn’t connected, click **Sign In**, or **Add Key** for key-based providers.
 3. Finish login in the browser, Terminal, or app that opens.
 4. Tokenroom picks up the session and shows usage.
 
-The same controls live in **Settings → Accounts**. Turning a provider off hides it from Tokenroom; it does not log you out of that provider.
+The same controls live in **Settings → Providers**. Turning a provider off hides it from Tokenroom; it does not log you out of that provider.
 
 Tokenroom only reads sessions. It never refreshes or rewrites another tool’s tokens. Claude and Grok sessions expire after a few hours; until you use `claude` or `grok` again (which refreshes them), Tokenroom keeps showing the last reading, faded, for up to a day.
 
 ## Privacy
 
-Tokenroom caches only percentages, reset times, and window labels in `~/Library/Application Support/Tokenroom/`. See [PRIVACY.md](PRIVACY.md). What changed between releases: [CHANGELOG.md](CHANGELOG.md).
+Tokenroom caches readings (percentages, reset times, window labels, and any balance or spend) and a week of hourly history in `~/Library/Application Support/Tokenroom/`. See [PRIVACY.md](PRIVACY.md). What changed between releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Settings
 
-Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at login. Bundle ID is `app.tokenroom.mac`.
+Providers and keys, menu bar (Percents, Meters, or Highest, and which providers show), refresh interval, iPhone & Watch sync, and launch at login. Bundle ID is `app.tokenroom.mac`.
 
 ## Develop
 

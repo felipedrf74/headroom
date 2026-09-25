@@ -140,9 +140,21 @@ enum CredentialReaders {
             guard let raw = readClaudeRawFromKeychain() else { return nil }
             let checksum = raw.utf8.reduce(into: 0) { sum, byte in sum = sum &+ Int(byte) }
             return "\(raw.count)-\(checksum)"
+        case .copilot:
+            return CopilotCredentials.sessionStamp()
+        case .antigravity:
+            return AntigravityClient.sessionStamp()
+        case .devin:
+            return DevinCredentials.sessionStamp()
+        case .zai, .kimiCode, .minimax, .opencodeGo:
+            return pastedKeyStamp(provider) ?? LocalKeys.sourceFile(for: provider).flatMap(fileStamp)
         case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
-            return apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
+            return pastedKeyStamp(provider)
         }
+    }
+
+    private static func pastedKeyStamp(_ provider: Provider) -> String? {
+        apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
     }
 
     /// Forgets cached tokens so the next read sees what the CLIs wrote since.
@@ -150,6 +162,7 @@ enum CredentialReaders {
     static func invalidateCaches() {
         claudeCache.withLock { $0 = nil }
         cursorCache.withLock { $0 = nil }
+        CopilotCredentials.invalidate()
     }
 
     static func invalidateKeychainServices() {
@@ -157,11 +170,7 @@ enum CredentialReaders {
     }
 
     private static func fileStamp(_ url: URL) -> String? {
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
-              let modified = values.contentModificationDate
-        else { return nil }
-        let size = values.fileSize ?? 0
-        return "\(Int(modified.timeIntervalSince1970))-\(size)"
+        LocalSources.fileStamp(url)
     }
 
     static func codexAuth() throws -> CodexAuth {
@@ -313,6 +322,12 @@ enum CredentialReaders {
         let list = names.sorted()
         claudeServicesCache.withLock { $0 = (list, Date()) }
         return list
+    }
+
+    /// A generic password through `/usr/bin/security`, for items another CLI created with it (gh
+    /// through go-keyring, Claude Code): their access lists trust that tool, so no prompt.
+    static func securityGenericPassword(service: String, account: String?) -> String? {
+        securityPassword(service: service, account: account)
     }
 
     private static func securityPassword(service: String, account: String?) -> String? {

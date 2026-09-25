@@ -1,0 +1,16 @@
+{
+  "base_resp": {
+    "status_code": 0
+  },
+  "current_subscribe_title": "Max",
+  "model_remains": [
+    {
+      "model_name": "MiniMax-M2",
+      "current_interval_total_count": 1000,
+      "current_interval_usage_count": 250,
+      "start_time": 1790316000000,
+      "end_time": 1790334000000,
+      "remains_time": 240000
+    }
+  ]
+}

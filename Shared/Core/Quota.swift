@@ -59,6 +59,27 @@ struct QuotaSnapshot: Equatable, Codable, Sendable {
     var remainingPercent: Double {
         max(0, min(100, 100 - usedPercent))
     }
+
+    /// A snapshot headlined by its first window: order windows primary first.
+    static func headlined(
+        by windows: [QuotaWindow],
+        provider: Provider,
+        fetchedAt: Date,
+        planLabel: String? = nil,
+        extra: ExtraUsage? = nil
+    ) throws -> QuotaSnapshot {
+        guard let primary = windows.first else { throw ProviderError.parse }
+        return QuotaSnapshot(
+            provider: provider,
+            usedPercent: primary.usedPercent,
+            resetsAt: primary.resetsAt,
+            fetchedAt: fetchedAt,
+            primaryTitle: primary.title,
+            windows: windows,
+            planLabel: planLabel,
+            extra: extra
+        )
+    }
 }
 
 /// An amount of money, credits, or requests. Values are in `unit`.

@@ -13,14 +13,16 @@ extension BlockingIO {
     }
 
     /// Runs a process to completion and returns its stdout. Output is drained while the process
-    /// runs, so more than a pipe buffer's worth can't deadlock it. Killed after `timeout`.
+    /// runs, so more than a pipe buffer's worth can't deadlock it. Killed after `timeout`, or
+    /// once it writes more than `maxOutput` bytes.
     /// Blocks the calling thread: call it from `run`, never from an async context directly.
     static func runProcess(
         _ executable: URL,
         arguments: [String],
         timeout: TimeInterval = 5,
         currentDirectory: URL? = nil,
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        maxOutput: Int = 16 * 1024 * 1024
     ) -> ProcessOutput {
         let process = Process()
         process.executableURL = executable
@@ -48,7 +50,17 @@ extension BlockingIO {
         let drained = DispatchSemaphore(value: 0)
         let reader = stdout.fileHandleForReading
         DispatchQueue.global(qos: .utility).async {
-            collected.set(reader.readDataToEndOfFile())
+            var data = Data()
+            while true {
+                let chunk = reader.availableData
+                if chunk.isEmpty { break }
+                data.append(chunk)
+                if data.count > maxOutput {
+                    process.terminate()
+                    break
+                }
+            }
+            collected.set(data)
             drained.signal()
         }
 

@@ -336,9 +336,16 @@ final class QuotaStore {
     }
 
     static var defaultClients: [any ProviderClient] {
-        var clients: [any ProviderClient] = [GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient()]
+        var clients: [any ProviderClient] = [
+            GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient(),
+            CopilotClient(), AntigravityClient(), DevinClient(),
+        ]
         for provider in Provider.allCases where provider.usesAPIKey {
-            clients.append(APIKeyClient(provider: provider, keys: CredentialReaders.apiKeys))
+            var client = APIKeyClient(provider: provider, keys: CredentialReaders.apiKeys)
+            if provider.access == .codingPlanKey {
+                client.localCredential = { try LocalKeys.credential(for: $0) }
+            }
+            clients.append(client)
         }
         return clients
     }
@@ -351,7 +358,7 @@ final class QuotaStore {
         await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
             group.addTask { await client.fetch() }
             group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(TokenroomHTTP.fetchBudget * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(client.fetchBudget * 1_000_000_000))
                 return nil
             }
             var result: Result<QuotaSnapshot, ProviderError> = .failure(.unreachable)

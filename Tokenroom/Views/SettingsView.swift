@@ -67,6 +67,26 @@ private struct ProvidersSettings: View {
             }
 
             Section {
+                ForEach(Provider.allCases.filter { $0.access == .codingPlanKey }) { provider in
+                    VStack(alignment: .leading, spacing: 8) {
+                        providerToggle(provider)
+                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                            keySheet = provider
+                        } onRemoved: {
+                            // A key the coding tool keeps may still be there.
+                            Task { await store.refresh(force: true, providers: [provider]) }
+                        }
+                        .padding(.leading, 28)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("Coding plans")
+            } footer: {
+                Text("Tokenroom uses the key your coding tool already has on this Mac (Claude Code settings, the kimi CLI, or OpenCode), or one you add here. Added keys stay in this Mac's Keychain.")
+            }
+
+            Section {
                 ForEach(Provider.allCases.filter { $0.category == .apiBalance }) { provider in
                     keyedProvider(provider, budgetLabel: "Budget")
                 }
@@ -194,10 +214,16 @@ private struct KeyRow: View {
     var onAdd: () -> Void
     var onRemoved: () -> Void
     @State private var metadata: APIKeyStore.Metadata?
+    @State private var localKey: String?
     @State private var message: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if metadata == nil, let localKey {
+                Text(localKey)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 8) {
                 if let metadata {
                     Text("•••• \(metadata.last4)\(metadata.region.map { " · \($0)" } ?? "")")
@@ -226,7 +252,9 @@ private struct KeyRow: View {
         .task {
             let keys = self.keys
             let provider = self.provider
-            metadata = await BlockingIO.run { keys.metadata(for: provider) }
+            let loaded = await BlockingIO.run { (keys.metadata(for: provider), LocalKeys.settingsCaption(for: provider)) }
+            metadata = loaded.0
+            localKey = loaded.1
         }
     }
 
@@ -348,7 +376,11 @@ private struct AddKeySheet: View {
                 _ = try await APIKeyClient.snapshot(for: provider, key: key, region: region)
                 save()
             } catch ProviderError.expired {
-                message = "Couldn't use this key. Check it and try again."
+                message = provider.key?.regions.isEmpty == false
+                    ? "Couldn't use this key. Check it, and the account it belongs to, and try again."
+                    : "Couldn't use this key. Check it and try again."
+            } catch ProviderError.notEntitled(let reason) {
+                message = reason
             } catch ProviderError.unreachable, ProviderError.rateLimited {
                 message = "Couldn't reach \(provider.displayName) to check the key."
                 offerSaveAnyway = true

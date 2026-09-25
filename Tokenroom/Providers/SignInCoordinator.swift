@@ -61,20 +61,7 @@ final class SignInCoordinator {
             return
         }
 
-        switch provider {
-        case .cursor, .grokBot:
-            guard let app = Tooling.applicationURL(
-                bundleIdentifiers: provider.appBundleIdentifiers,
-                names: provider.appNames
-            ) else {
-                phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
-                return
-            }
-            Tooling.openApplication(app)
-        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
-            phase = .idle
-            return
-        case .grok, .claude, .openai:
+        if provider.cliExecutable != nil {
             guard let executable = Tooling.resolveProviderCLI(provider) else {
                 phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
                 return
@@ -88,6 +75,18 @@ final class SignInCoordinator {
                 arguments: provider.loginArguments,
                 resetClaudeSession: resetDeadSession
             )
+        } else if !provider.appNames.isEmpty || !provider.appBundleIdentifiers.isEmpty {
+            guard let app = Tooling.applicationURL(
+                bundleIdentifiers: provider.appBundleIdentifiers,
+                names: provider.appNames
+            ) else {
+                phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
+                return
+            }
+            Tooling.openApplication(app)
+        } else {
+            phase = .idle
+            return
         }
 
         let deadline = Date().addingTimeInterval(180)

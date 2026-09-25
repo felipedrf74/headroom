@@ -64,6 +64,15 @@ enum LocalSources {
         }
     }
 
+    /// Changes when a file does: its modification date and size, never its contents.
+    static func fileStamp(_ url: URL) -> String? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let modified = values.contentModificationDate
+        else { return nil }
+        let size = values.fileSize ?? 0
+        return "\(Int(modified.timeIntervalSince1970))-\(size)"
+    }
+
     // MARK: Claude Code settings (z.ai, MiniMax)
 
     /// A coding-plan key that Claude Code is configured to use, found in `~/.claude/settings.json`
@@ -116,14 +125,14 @@ enum LocalSources {
 
     /// Runs a CLI that prints JSON, in an empty temporary folder with no input, and returns its
     /// output. Nil when it fails or times out.
-    static func runJSONCommand(_ executable: URL, arguments: [String], timeout: TimeInterval = 20) -> Data? {
+    static func runJSONCommand(_ executable: URL, arguments: [String], timeout: TimeInterval = 20, maxOutput: Int = 1 << 20) -> Data? {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TokenroomCLI-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = Tooling.searchPATH
         environment["NO_COLOR"] = "1"
-        let output = BlockingIO.runProcess(executable, arguments: arguments, timeout: timeout, currentDirectory: folder, environment: environment)
+        let output = BlockingIO.runProcess(executable, arguments: arguments, timeout: timeout, currentDirectory: folder, environment: environment, maxOutput: maxOutput)
         guard output.succeeded, !output.stdout.isEmpty else { return nil }
         return output.stdout
     }

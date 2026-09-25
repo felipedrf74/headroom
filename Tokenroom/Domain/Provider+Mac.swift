@@ -53,7 +53,26 @@ extension Provider {
                 appBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
                 appNames: ["Cursor"]
             )
-        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
+        case .copilot:
+            ProviderLogin(
+                cliExecutable: "gh",
+                loginArguments: ["auth", "login", "--hostname", "github.com", "--web"],
+                installToolName: "gh",
+                installURL: URL(string: "https://cli.github.com")!
+            )
+        case .antigravity:
+            ProviderLogin(
+                installToolName: "Antigravity",
+                installURL: URL(string: "https://antigravity.google/download")!,
+                appNames: ["Antigravity"]
+            )
+        case .devin:
+            ProviderLogin(
+                installToolName: "Devin",
+                installURL: URL(string: "https://devin.ai/download")!,
+                appNames: ["Devin", "Windsurf"]
+            )
+        case .zai, .kimiCode, .minimax, .opencodeGo, .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
             nil
         }
     }

@@ -8,6 +8,13 @@ enum Provider: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case claude
     case openai
     case cursor
+    case copilot
+    case antigravity
+    case devin
+    case zai
+    case kimiCode
+    case minimax
+    case opencodeGo
     case openrouter
     case deepseek
     case moonshot
@@ -33,6 +40,16 @@ struct ProviderDescriptor: Sendable {
         case orgSpend
     }
 
+    /// Where a provider's credential comes from.
+    enum Access: Sendable {
+        /// Another tool's login on the Mac (a CLI or an app). The iPhone sees it through the relay.
+        case localLogin
+        /// A pasted key, or on the Mac the key a coding tool is already configured with.
+        case codingPlanKey
+        /// A pasted key only.
+        case pastedKey
+    }
+
     var displayName: String
     var shortName: String
     /// One letter for the Mac's fallback icon tile.
@@ -55,6 +72,11 @@ struct ProviderDescriptor: Sendable {
     var minimumInterval: TimeInterval = 0
     /// For providers read with a pasted API key.
     var key: KeySpec? = nil
+
+    var access: Access {
+        guard let key else { return .localLogin }
+        return key.isCodingPlan ? .codingPlanKey : .pastedKey
+    }
 }
 
 /// How a provider's API key is entered.
@@ -68,6 +90,9 @@ struct KeySpec: Sendable {
     var regions: [String] = []
     /// Org-wide admin or management keys get an extra warning.
     var isAdmin = false
+    /// A subscription's key that a coding tool on the Mac may already hold (Claude Code
+    /// settings, the Kimi Code CLI, OpenCode). Pasting one is optional there.
+    var isCodingPlan = false
 }
 
 extension Provider {
@@ -139,6 +164,83 @@ extension Provider {
                 assetName: "ProviderCursor",
                 signInHint: "Sign in to Cursor to see usage.",
                 expiredHint: "Session expired. Sign in to Cursor again."
+            )
+        case .copilot:
+            ProviderDescriptor(
+                displayName: "GitHub Copilot",
+                shortName: "Copilot",
+                letter: "H",
+                monogram: "GH",
+                tintHex: "#24292F",
+                signInHint: "Sign in with gh auth login, or in a Copilot editor extension, to see usage.",
+                expiredHint: "GitHub session expired. Run gh auth login again."
+            )
+        case .antigravity:
+            ProviderDescriptor(
+                displayName: "Antigravity",
+                shortName: "Antigravity",
+                letter: "A",
+                monogram: "AG",
+                tintHex: "#4285F4",
+                signInHint: "Sign in to Antigravity, and install agy 1.1.11 or later, to see usage.",
+                expiredHint: "Session expired. Open Antigravity to sign in again.",
+                // Each check runs the agy CLI, which can take a while.
+                minimumInterval: 5 * 60
+            )
+        case .devin:
+            ProviderDescriptor(
+                displayName: "Devin",
+                shortName: "Devin",
+                letter: "D",
+                monogram: "DV",
+                tintHex: "#2F6F5E",
+                signInHint: "Sign in to Devin Desktop to see usage.",
+                expiredHint: "Session expired. Sign in to Devin Desktop again."
+            )
+        case .zai:
+            ProviderDescriptor(
+                displayName: "Z.ai",
+                shortName: "GLM",
+                letter: "Z",
+                monogram: "Z",
+                tintHex: "#2D5BFF",
+                signInHint: "Add a Z.ai API key, or use a GLM Coding Plan key in Claude Code on this Mac.",
+                expiredHint: "Z.ai rejected this key. It may belong to the other region.",
+                key: KeySpec(createURL: URL(string: "https://z.ai/manage-apikey/apikey-list")!, regions: ["Global", "China"], isCodingPlan: true)
+            )
+        case .kimiCode:
+            ProviderDescriptor(
+                displayName: "Kimi Code",
+                shortName: "Kimi",
+                letter: "K",
+                monogram: "K",
+                tintHex: "#1F2937",
+                signInHint: "Sign in with the kimi CLI (Kimi Code), or add a Kimi Code API key.",
+                // The CLI owns its login; Tokenroom never refreshes it.
+                expiredHint: "Session expired. Run kimi once to refresh it, or add an API key.",
+                key: KeySpec(createURL: URL(string: "https://www.kimi.com/code/console")!, prefixHint: "sk-kimi-", regions: ["Global", "China"], isCodingPlan: true)
+            )
+        case .minimax:
+            ProviderDescriptor(
+                displayName: "MiniMax",
+                shortName: "MiniMax",
+                letter: "M",
+                monogram: "MM",
+                tintHex: "#E2167E",
+                signInHint: "Add a MiniMax Coding Plan key, or use one in Claude Code on this Mac.",
+                expiredHint: "MiniMax rejected this key. It may belong to the other region.",
+                key: KeySpec(createURL: URL(string: "https://platform.minimax.io/user-center/basic-information/interface-key")!, regions: ["Global", "China"], isCodingPlan: true)
+            )
+        case .opencodeGo:
+            ProviderDescriptor(
+                displayName: "OpenCode Go",
+                shortName: "OpenCode",
+                letter: "O",
+                monogram: "OC",
+                tintHex: "#211E1E",
+                signInHint: "Sign in to OpenCode Go in OpenCode, or add its API key.",
+                expiredHint: "OpenCode rejected this key. Sign in to OpenCode again.",
+                key: KeySpec(createURL: URL(string: "https://opencode.ai/go")!, isCodingPlan: true)
             )
         case .openrouter:
             ProviderDescriptor(
@@ -232,6 +334,7 @@ extension Provider {
     var displayName: String { descriptor.displayName }
     var key: KeySpec? { descriptor.key }
     var usesAPIKey: Bool { descriptor.key != nil }
+    var access: ProviderDescriptor.Access { descriptor.access }
     var shortName: String { descriptor.shortName }
     var letter: String { descriptor.letter }
     var monogram: String { descriptor.monogram }

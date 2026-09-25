@@ -1,0 +1,33 @@
+{
+  "response": {
+    "groups": [
+      {
+        "displayName": "Gemini models",
+        "buckets": [
+          {
+            "bucketId": "gemini-weekly",
+            "window": "weekly",
+            "remaining": {
+              "case": "remainingFraction",
+              "value": 0.5
+            },
+            "resetTime": "2026-09-29T12:00:00Z"
+          }
+        ]
+      },
+      {
+        "displayName": "Claude and other models",
+        "buckets": [
+          {
+            "bucketId": "3p-weekly",
+            "window": "weekly",
+            "remaining": {
+              "remainingFraction": 0.75
+            },
+            "resetTime": "2026-09-29T12:00:00Z"
+          }
+        ]
+      }
+    ]
+  }
+}
