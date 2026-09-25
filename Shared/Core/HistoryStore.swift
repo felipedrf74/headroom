@@ -1,7 +1,8 @@
 import Foundation
 
-/// A week of hourly usage per window, kept in Application Support/Tokenroom/history.json, plus
-/// the last six hours of raw readings in memory for pace. Percentages only.
+/// A week of hourly usage per window, kept in `history.json` next to the readings cache (the Mac's
+/// Application Support folder, the iPhone's App Group), plus the last six hours of raw readings in
+/// memory for pace. Percentages only.
 @MainActor
 final class HistoryStore {
     /// Raw readings kept for pace: six hours at a five-minute refresh.
@@ -12,7 +13,7 @@ final class HistoryStore {
     private var dirty = false
     private let fileURL: URL?
 
-    init(directory: URL? = SnapshotCache.defaultDirectory) {
+    init(directory: URL?) {
         fileURL = directory?.appendingPathComponent("history.json")
         if let fileURL, let data = try? Data(contentsOf: fileURL),
            let saved = try? RelayEnvelope.decoder.decode([String: UsageHistory].self, from: data) {
