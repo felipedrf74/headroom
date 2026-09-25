@@ -448,11 +448,16 @@ final class MobileStore {
         let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskID)
         request.earliestBeginDate = now.addingTimeInterval(Self.backgroundInterval)
         do {
+            // Xcode 27 (Swift 6.4) has iOS 27's submitTaskRequest; Xcode 26 builds keep submit.
+            #if compiler(>=6.4)
             if #available(iOS 27.0, *) {
                 try await BGTaskScheduler.shared.submitTaskRequest(request)
             } else {
                 try BGTaskScheduler.shared.submit(request)
             }
+            #else
+            try BGTaskScheduler.shared.submit(request)
+            #endif
         } catch {
             logger.error("background refresh not scheduled: \(String(describing: error), privacy: .public)")
         }
