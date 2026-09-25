@@ -73,7 +73,13 @@ enum SampleData {
             snapshot(.deepseek, [
                 QuotaWindow(id: "balance-usd", kind: .pool, title: "Balance", usedPercent: 0, resetsAt: nil, amount: QuotaAmount(remaining: 12.4, unit: "usd"), metered: false),
             ]),
-            snapshot(.anthropicOrg, [month("spend", "This month", used: 312.5, limit: 1000, unit: "usd")]),
+            // Org spend reports only what's spent; the budget turns it into a meter.
+            snapshot(.anthropicOrg, [
+                QuotaWindow(
+                    id: "spend-month", kind: .monthly, title: "This month", usedPercent: 31.25, resetsAt: nextMonth, startsAt: monthStart,
+                    amount: QuotaAmount(used: 312.5, limit: 1000, unit: "usd")
+                ),
+            ]),
         ]
     }
 
@@ -81,6 +87,11 @@ enum SampleData {
     /// previous window peaked and reset.
     static func history(for snapshot: QuotaSnapshot, now: Date) -> [String: UsageHistory] {
         var result: [String: UsageHistory] = [:]
+        for window in snapshot.windows where !window.isMetered {
+            if let remaining = window.amount?.remainingOrComputed {
+                result[window.id] = balanceWeek(remaining: remaining, now: now)
+            }
+        }
         for (index, window) in snapshot.windows.enumerated() where window.isMetered && window.kind != .session {
             guard let resetsAt = window.resetsAt,
                   let length = Pace.windowLength(kind: window.kind, resetsAt: resetsAt, startsAt: window.startsAt, windowSeconds: window.windowSeconds)
@@ -108,6 +119,9 @@ enum SampleData {
             return total
         }
         let previousOpened = opened.addingTimeInterval(-length)
+        if opened > history.start {
+            history.resets = [opened]
+        }
         let soFar = max(work(from: opened, to: now), 1)
         let previousTotal = max(work(from: previousOpened, to: opened), 1)
         var time = history.start
@@ -118,6 +132,27 @@ enum SampleData {
                 history.record(previousPeak * work(from: previousOpened, to: time) / previousTotal, at: time)
             }
             time = time.addingTimeInterval(step)
+        }
+        return history
+    }
+
+    /// A balance topped up four days ago and spent down steadily since, so its runway shows.
+    static func balanceWeek(remaining: Double, now: Date) -> UsageHistory {
+        var history = UsageHistory(endingAt: now)
+        let toppedUp = now.addingTimeInterval(-4 * 86_400)
+        let startAmount = remaining + 17.6
+        var time = history.start
+        while time <= now {
+            let value: Double
+            if time < toppedUp {
+                // Before the top-up: running low.
+                value = max(2, 9 - 7 * time.timeIntervalSince(history.start) / toppedUp.timeIntervalSince(history.start))
+            } else {
+                value = startAmount - 17.6 * time.timeIntervalSince(toppedUp) / now.timeIntervalSince(toppedUp)
+            }
+            history.record(0, at: time)
+            history.recordAmount((value * 100).rounded() / 100, at: time)
+            time = time.addingTimeInterval(UsageHistory.step)
         }
         return history
     }

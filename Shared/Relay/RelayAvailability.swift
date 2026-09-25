@@ -20,8 +20,11 @@ enum RelayAvailability {
         return containers.first
         #else
         // Set from Config/*.xcconfig; empty in builds without a team.
-        let identifier = Bundle.main.object(forInfoDictionaryKey: "TokenroomCloudContainer") as? String
-        return identifier?.isEmpty == false ? identifier : nil
+        // An unfilled `$(…)` means the build had no team: sample data only.
+        guard let identifier = Bundle.main.object(forInfoDictionaryKey: "TokenroomCloudContainer") as? String,
+              !identifier.isEmpty, !identifier.hasPrefix("$(")
+        else { return nil }
+        return identifier
         #endif
     }()
 

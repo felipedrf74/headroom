@@ -1,0 +1,19 @@
+// Unit tests hosted in Tokenroom for iPhone: what only the iPhone app does (its store, the
+// widgets' shared state). Shared logic is tested on the Mac in TokenroomTests.
+#include "Version.xcconfig"
+
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+SUPPORTS_MACCATALYST = NO
+TARGETED_DEVICE_FAMILY = 1
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_BUNDLE_IDENTIFIER = $(TOKENROOM_BUNDLE_PREFIX).ios.tests
+MARKETING_VERSION = $(TOKENROOM_MOBILE_VERSION)
+CURRENT_PROJECT_VERSION = $(TOKENROOM_MOBILE_BUILD)
+GENERATE_INFOPLIST_FILE = YES
+CODE_SIGN_STYLE = Automatic
+
+TEST_HOST = $(BUILT_PRODUCTS_DIR)/TokenroomMobile.app/TokenroomMobile
+BUNDLE_LOADER = $(TEST_HOST)

@@ -1,0 +1,116 @@
+{
+  "grok": {
+    "provider": "grok",
+    "usedPercent": 42.5,
+    "resetsAt": 812354400,
+    "fetchedAt": 812030280,
+    "primaryTitle": "Weekly",
+    "windows": [
+      {
+        "id": "primary",
+        "kind": "weekly",
+        "title": "Weekly",
+        "usedPercent": 42.5,
+        "resetsAt": 812354400
+      },
+      {
+        "id": "on-demand",
+        "kind": "pool",
+        "title": "Extra",
+        "usedPercent": 5,
+        "resetsAt": 812354400
+      }
+    ]
+  },
+  "grokBot": {
+    "provider": "grokBot",
+    "usedPercent": 8.708505,
+    "resetsAt": 812228400,
+    "fetchedAt": 812030280,
+    "primaryTitle": "Weekly",
+    "windows": [
+      {
+        "id": "weekly",
+        "kind": "weekly",
+        "title": "Weekly",
+        "usedPercent": 8.708505,
+        "resetsAt": 812228400
+      },
+      {
+        "id": "plan",
+        "kind": "pool",
+        "title": "SuperGrok Heavy",
+        "usedPercent": 8.708505
+      }
+    ]
+  },
+  "claude": {
+    "provider": "claude",
+    "usedPercent": 71,
+    "resetsAt": 812228400,
+    "fetchedAt": 812030280,
+    "primaryTitle": "Weekly",
+    "windows": [
+      {
+        "id": "weekly",
+        "kind": "weekly",
+        "title": "Weekly",
+        "usedPercent": 71,
+        "resetsAt": 812228400
+      },
+      {
+        "id": "session",
+        "kind": "session",
+        "title": "Session",
+        "usedPercent": 18,
+        "resetsAt": 812041200
+      }
+    ]
+  },
+  "openai": {
+    "provider": "openai",
+    "usedPercent": 91,
+    "resetsAt": 812307600,
+    "fetchedAt": 812030280,
+    "primaryTitle": "Weekly",
+    "windows": [
+      {
+        "id": "weekly",
+        "kind": "weekly",
+        "title": "Weekly",
+        "usedPercent": 91,
+        "resetsAt": 812307600
+      }
+    ]
+  },
+  "cursor": {
+    "provider": "cursor",
+    "usedPercent": 55,
+    "resetsAt": 813304800,
+    "fetchedAt": 812030280,
+    "primaryTitle": "This cycle",
+    "windows": [
+      {
+        "id": "cycle",
+        "kind": "billingCycle",
+        "title": "This cycle",
+        "usedPercent": 55,
+        "resetsAt": 813304800
+      },
+      {
+        "id": "cursor-models",
+        "kind": "pool",
+        "title": "Cursor Models",
+        "usedPercent": 55,
+        "resetsAt": 813304800
+      },
+      {
+        "id": "other-models",
+        "kind": "pool",
+        "title": "Other Models",
+        "usedPercent": 12,
+        "resetsAt": 813304800
+      }
+    ]
+  }
+}

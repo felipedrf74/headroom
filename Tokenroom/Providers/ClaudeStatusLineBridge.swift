@@ -25,6 +25,8 @@ struct ClaudeStatusLineBridge: Sendable {
     var readingURL: URL { bridgeDirectory.appendingPathComponent("claude-rate-limits.json") }
     var previousCommandURL: URL { bridgeDirectory.appendingPathComponent("previous-command") }
     var previousStatusLineURL: URL { bridgeDirectory.appendingPathComponent("previous-statusline.json") }
+    /// `settings.json` as it was the first time the bridge changed it. Never pruned.
+    var originalBackupURL: URL { bridgeDirectory.appendingPathComponent("settings.original.json") }
 
     /// The command Claude Code runs; quoted because the path has spaces.
     var command: String {
@@ -42,10 +44,17 @@ struct ClaudeStatusLineBridge: Sendable {
         try fileManager.createDirectory(at: bridgeDirectory, withIntermediateDirectories: true)
 
         if fileManager.fileExists(atPath: settingsURL.path) {
-            let backup = bridgeDirectory.appendingPathComponent("settings.backup-\(Int(now.timeIntervalSince1970)).json")
+            // The file as it was before Tokenroom first changed it, kept for good; later
+            // backups rotate.
+            if !fileManager.fileExists(atPath: originalBackupURL.path) {
+                try fileManager.copyItem(at: settingsURL, to: originalBackupURL)
+                try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: originalBackupURL.path)
+            }
+            let backup = bridgeDirectory.appendingPathComponent("settings.backup-\(Int(now.timeIntervalSince1970 * 1000)).json")
             try? fileManager.removeItem(at: backup)
             try fileManager.copyItem(at: settingsURL, to: backup)
             try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+            pruneBackups()
         }
 
         let current = settings["statusLine"] as? [String: Any]
@@ -122,10 +131,69 @@ struct ClaudeStatusLineBridge: Sendable {
         return object
     }
 
+    /// Changes only `statusLine` in the file as the user wrote it; rewrites the whole file only
+    /// when that edit can't be made and checked.
     private func writeSettings(_ settings: [String: Any]) throws {
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+        if let original = try? String(contentsOf: settingsURL, encoding: .utf8) {
+            let edited: String?
+            if let statusLine = settings["statusLine"] {
+                edited = JSONTextEdit.setting("statusLine", to: statusLine, in: original)
+            } else {
+                edited = JSONTextEdit.removing("statusLine", in: original)
+            }
+            if let edited, let data = edited.data(using: .utf8),
+               let check = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               NSDictionary(dictionary: check).isEqual(to: settings) {
+                try data.write(to: settingsURL, options: .atomic)
+                return
+            }
+        }
         let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try data.write(to: settingsURL, options: .atomic)
+    }
+
+    /// Keeps the five newest backups of `settings.json`.
+    static let backupsKept = 5
+
+    private func pruneBackups() {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: bridgeDirectory.path) else { return }
+        let backups = names.filter { $0.hasPrefix("settings.backup-") && $0.hasSuffix(".json") }
+            .sorted { lhs, rhs in Self.backupTime(lhs) > Self.backupTime(rhs) }
+        for name in backups.dropFirst(Self.backupsKept) {
+            try? fileManager.removeItem(at: bridgeDirectory.appendingPathComponent(name))
+        }
+    }
+
+    private static func backupTime(_ name: String) -> Int {
+        Int(name.dropFirst("settings.backup-".count).dropLast(".json".count)) ?? 0
+    }
+
+    /// Projects whose own Claude Code settings set a status line, which wins over the one in
+    /// `~/.claude/settings.json`. Read from Claude Code's project list; never edited.
+    func projectOverrides(limit: Int = 300) -> [URL] {
+        let configURL = claudeDirectory.deletingLastPathComponent().appendingPathComponent(".claude.json")
+        guard let data = try? Data(contentsOf: configURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = root["projects"] as? [String: Any]
+        else { return [] }
+        var found: [URL] = []
+        for path in projects.keys.sorted().prefix(limit) {
+            let project = URL(fileURLWithPath: path, isDirectory: true)
+            let folder = project.appendingPathComponent(".claude", isDirectory: true)
+            // A project at the home folder shares the user settings file; that's ours.
+            guard folder.standardizedFileURL != claudeDirectory.standardizedFileURL else { continue }
+            for name in ["settings.json", "settings.local.json"] {
+                guard let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      object["statusLine"] != nil
+                else { continue }
+                found.append(project)
+                break
+            }
+        }
+        return found
     }
 
     /// Saves only `rate_limits` (never session, folder, or transcript data), then runs the

@@ -26,6 +26,7 @@ Tokenroom only reads other tools' sessions. Never refresh, rewrite, or copy thei
 xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'platform=macOS'
 ./scripts/typecheck-shared.sh
 xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile -destination 'generic/platform=iOS Simulator'
+xcodebuild test -project Tokenroom.xcodeproj -scheme TokenroomMobile -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
-Shared logic (relay, alerts, ranking, parsers) is tested on the Mac. The last command also builds the widgets, the Watch app, and its complications. CI (`.github/workflows/ci.yml`) runs all three on the newest Xcode on the runner (26 or 27).
+Shared logic (relay, alerts, ranking, parsers, forecasts) is tested on the Mac in `TokenroomTests`; `TokenroomMobileTests` covers what only the iPhone app does. The iPhone build also builds the widgets, the Watch app, and its complications. A debug Mac build renders its UI from sample data with `-TokenroomSnapshots <folder>`. CI (`.github/workflows/ci.yml`) runs all three on the newest Xcode on the runner (26 or 27).

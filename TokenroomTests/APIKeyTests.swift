@@ -112,6 +112,19 @@ final class APIKeyTests: XCTestCase {
         XCTAssertThrowsError(try store.save("   ", for: .deepseek))
     }
 
+    func testAKeysWarningIsKeptWithIt() throws {
+        let store = APIKeyStore(servicePrefix: "app.tokenroom.tests.\(UUID().uuidString).")
+        stores.append(store)
+        try store.save("test-key-value-c3d4", for: .xaiOrg, warning: "This key can also change your team's keys or billing.")
+        XCTAssertEqual(store.metadata(for: .xaiOrg)?.warning, "This key can also change your team's keys or billing.")
+        try store.save("test-key-value-e5f6", for: .xaiOrg)
+        XCTAssertNil(store.metadata(for: .xaiOrg)?.warning, "A new key starts without the old key's warning")
+
+        let older = try JSONDecoder().decode(APIKeyStore.Metadata.self, from: Data(#"{"last4":"a1b2","addedAt":812030400,"region":"China"}"#.utf8))
+        XCTAssertNil(older.warning, "Keys saved before warnings existed still read")
+        XCTAssertEqual(older.region, "China")
+    }
+
     func testMissingKeyReadsAsSignedOut() async {
         let store = APIKeyStore(servicePrefix: "app.tokenroom.tests.\(UUID().uuidString).")
         let result = await APIKeyClient(provider: .deepseek, keys: store).fetch()

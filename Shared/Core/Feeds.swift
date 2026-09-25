@@ -26,6 +26,12 @@ enum ModelFeed {
     /// Labs followed by default: the ones behind Tokenroom's providers.
     static let defaultVendors: Set<String> = ["anthropic", "openai", "x-ai", "google", "z-ai", "moonshotai", "minimax", "deepseek"]
 
+    /// Names for OpenRouter's lab IDs, for labs not in the latest list.
+    static let vendorNames: [String: String] = [
+        "anthropic": "Anthropic", "openai": "OpenAI", "x-ai": "xAI", "google": "Google", "z-ai": "Z.ai",
+        "moonshotai": "Moonshot AI", "minimax": "MiniMax", "deepseek": "DeepSeek",
+    ]
+
     /// Releases newest first. Skips aliases (`~vendor/…`, `…-latest`), routers (`openrouter/…`),
     /// and stealth models; folds variants (`:free`, `:batch`, …) into their base model.
     static func releases(from data: Data) throws -> [ModelRelease] {
@@ -100,6 +106,19 @@ struct FeedItem: Codable, Equatable, Sendable, Identifiable {
     var published: Date?
     /// Which feed it came from, e.g. "Claude Code".
     var source: String
+
+    /// Release feeds title entries with a bare version; "Codex 0.157.0" reads better in a list.
+    var displayTitle: String {
+        title.range(of: #"^v?\d+(\.\d+)+([-+.][0-9A-Za-z.]+)?$"#, options: .regularExpression) != nil
+            ? "\(source) \(title)"
+            : title
+    }
+
+    /// The same post or release in two feeds: the same title, or the same version under the same
+    /// name ("Claude Code 2.1.282" from the changelog, "Claude Code v2.1.282" from GitHub).
+    var duplicateKey: String {
+        displayTitle.lowercased().replacingOccurrences(of: #"\sv(?=\d)"#, with: " ", options: .regularExpression)
+    }
 }
 
 /// An official news or changelog feed. Only RSS and Atom, never scraped pages.
@@ -113,9 +132,26 @@ struct FeedSource: Sendable, Identifiable, Equatable {
     var skipsPrereleases = false
     /// Keeps only entries whose link contains this, e.g. a blog's announcements.
     var linkContains: String? = nil
+    /// Largest response read, in bytes. A few feeds embed whole release notes.
+    var sizeLimit = FeedParser.sizeLimit
+    /// The feed it belongs to: a second source for the same product, shown under that feed's
+    /// name and turned on and off with it.
+    var partOf: String? = nil
+
+    /// The name its items show, and fold duplicates under.
+    var itemSource: String {
+        partOf.flatMap { id in Self.catalog.first { $0.id == id }?.name } ?? name
+    }
+
+    /// Feeds people turn on and off; the ones `partOf` another follow it.
+    static var toggles: [FeedSource] {
+        catalog.filter { $0.partOf == nil }
+    }
 
     static let catalog: [FeedSource] = [
         FeedSource(id: "claude-code", name: "Claude Code", url: URL(string: "https://code.claude.com/docs/en/changelog/rss.xml")!, provider: .claude),
+        // The same versions as the changelog, often sooner; one shows when both have it.
+        FeedSource(id: "claude-code-releases", name: "Claude Code releases", url: URL(string: "https://github.com/anthropics/claude-code/releases.atom")!, provider: .claude, skipsPrereleases: true, partOf: "claude-code"),
         FeedSource(id: "openai-news", name: "OpenAI", url: URL(string: "https://openai.com/news/rss.xml")!, provider: .openai),
         FeedSource(id: "codex-releases", name: "Codex", url: URL(string: "https://github.com/openai/codex/releases.atom")!, provider: .openai, skipsPrereleases: true),
         FeedSource(id: "gemini", name: "Google Gemini", url: URL(string: "https://blog.google/products-and-platforms/products/gemini/rss/")!, provider: .antigravity),
@@ -125,6 +161,12 @@ struct FeedSource: Sendable, Identifiable, Equatable {
         FeedSource(id: "zai", name: "Z.ai", url: URL(string: "https://docs.z.ai/release-notes/new-released/rss.xml")!, provider: .zai),
         FeedSource(id: "kimi-code", name: "Kimi Code", url: URL(string: "https://github.com/MoonshotAI/kimi-code/releases.atom")!, provider: .kimiCode, skipsPrereleases: true),
         FeedSource(id: "openrouter", name: "OpenRouter", url: URL(string: "https://openrouter.ai/blog/feed.xml")!, provider: .openrouter, linkContains: "/blog/announcements/"),
+        // ChatGPT and Codex product notes. Its CLI entries repeat `codex-releases`, so only the
+        // `#codex-…` notes are kept. The feed embeds long release notes: allow 4 MB.
+        FeedSource(id: "codex-changelog", name: "ChatGPT & Codex", url: URL(string: "https://learn.chatgpt.com/docs/changelog/rss.xml")!, provider: .openai, linkContains: "#codex-", sizeLimit: 4 * 1024 * 1024),
+        FeedSource(id: "antigravity-blog", name: "Antigravity", url: URL(string: "https://antigravity.google/blog/rss.xml")!, provider: .antigravity),
+        FeedSource(id: "antigravity-cli", name: "Antigravity CLI", url: URL(string: "https://github.com/google-antigravity/antigravity-cli/releases.atom")!, provider: .antigravity, skipsPrereleases: true),
+        FeedSource(id: "minimax-code", name: "MiniMax Code", url: URL(string: "https://github.com/MiniMax-AI/minimax-code/releases.atom")!, provider: .minimax, skipsPrereleases: true),
     ]
 }
 
@@ -134,15 +176,18 @@ enum FeedParser {
     static let sizeLimit = 2 * 1024 * 1024
 
     static func items(from data: Data, source: FeedSource) -> [FeedItem] {
-        guard data.count <= sizeLimit else { return [] }
+        guard data.count <= source.sizeLimit else { return [] }
         let delegate = FeedXMLDelegate(source: source)
         let parser = XMLParser(data: data)
         parser.delegate = delegate
         parser.shouldResolveExternalEntities = false
         parser.parse()
+        // Some feeds repeat a title for every small update ("ChatGPT for iOS"); keep the first.
+        var titles = Set<String>()
         return delegate.items
             .filter { !source.skipsPrereleases || !isPrerelease($0.title) }
             .filter { item in source.linkContains.map { item.link?.absoluteString.contains($0) == true } ?? true }
+            .filter { titles.insert($0.title.lowercased()).inserted }
             .prefix(itemLimit)
             .map { $0 }
     }
@@ -276,7 +321,7 @@ private final class FeedXMLDelegate: NSObject, XMLParserDelegate {
             title: cleanTitle,
             link: url,
             published: FeedParser.date(published) ?? FeedParser.date(updated),
-            source: source.name
+            source: source.itemSource
         ))
     }
 }

@@ -22,3 +22,6 @@ INFOPLIST_KEY_CFBundleDisplayName = Tokenroom
 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
 SWIFT_EMIT_LOC_STRINGS = YES
+
+// Reads iCloud only; the relay's write methods stay out of this build.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) TOKENROOM_RELAY_READONLY

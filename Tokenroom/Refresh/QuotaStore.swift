@@ -20,11 +20,15 @@ final class QuotaStore {
     let relay: RelayPublisher?
     /// A week of hourly usage per window, next to the snapshot cache.
     let history: HistoryStore
+    /// New models and announcements for the News window, fetched only when turned on. Nil in tests.
+    let news: NewsStore?
     private var alertLedger: AlertLedger
 
     private let clients: [Provider: any ProviderClient]
     private let cache: SnapshotCache
     private var rateLimitedUntil: [Provider: Date] = [:]
+    /// When each provider's endpoint was last called, successful or not; spacing counts from it.
+    private var lastAttemptAt: [Provider: Date] = [:]
     /// Readings before a budget was applied, so a new budget shows at once.
     private var rawSnapshots: [Provider: QuotaSnapshot] = [:]
     private var loopTask: Task<Void, Never>?
@@ -38,17 +42,20 @@ final class QuotaStore {
         clients: [any ProviderClient] = QuotaStore.defaultClients,
         cache: SnapshotCache = SnapshotCache(),
         relay: RelayPublisher? = nil,
+        news: NewsStore? = nil,
         showsLegacyNotice: Bool = false
     ) {
         self.settings = settings
         self.clients = Dictionary(uniqueKeysWithValues: clients.map { ($0.provider, $0) })
         self.cache = cache
         self.relay = relay
+        self.news = news
         self.history = HistoryStore(directory: cache.directory)
         self.alertLedger = AlertLedger.load(from: cache.directory)
         self.showsLegacyNotice = showsLegacyNotice
         self.signIn = SignInCoordinator()
         let cached = cache.load()
+        checkedAt = cache.loadChecked()
         for provider in Provider.allCases {
             if let snapshot = cached[provider] {
                 statuses[provider] = .stale(snapshot)
@@ -106,13 +113,12 @@ final class QuotaStore {
 
     func refresh(force: Bool = false, providers: [Provider]? = nil) async {
         if let inFlight {
-            if force {
-                inFlight.cancel()
-                await inFlight.value
-            } else {
-                await inFlight.value
-                return
-            }
+            // A check in flight finishes rather than being cancelled: its calls are already out,
+            // and calling a rate-limited provider again right away can earn a 429. Then a forced
+            // refresh checks what it asked for; the spacing rules keep just-checked providers
+            // resting.
+            await inFlight.value
+            guard force else { return }
         }
         if !force, let lastAttempt, Date().timeIntervalSince(lastAttempt) < 15 {
             return
@@ -123,32 +129,65 @@ final class QuotaStore {
         }
         inFlight = task
         await task.value
-        inFlight = nil
+        // Another refresh may have started once this one finished.
+        if inFlight == task {
+            inFlight = nil
+        }
     }
 
     private func refreshNow(providers: [Provider]?) async {
         isRefreshing = true
         let now = Date()
         lastAttempt = now
-        let enabled = (providers ?? Provider.allCases).filter { provider in
-            guard settings.isEnabled(provider) else { return false }
+        let earlierAttempts = lastAttemptAt
+        var due: [Provider] = []
+        var resting: [Provider] = []
+        for provider in providers ?? Provider.allCases where settings.isEnabled(provider) {
             // A provider that answered 429 is left alone until its Retry-After passes.
-            if let until = rateLimitedUntil[provider], until > now { return false }
-            if let last = checkedAt[provider], now.timeIntervalSince(last) < provider.minimumInterval { return false }
-            return true
+            if let until = rateLimitedUntil[provider], until > now { continue }
+            // Spacing counts from the last call, so failures don't bring the next one closer.
+            if let last = lastAttemptAt[provider], now.timeIntervalSince(last) < provider.minimumInterval {
+                resting.append(provider)
+            } else {
+                due.append(provider)
+                lastAttemptAt[provider] = now
+            }
         }
         await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in
-            for provider in enabled {
+            for provider in due {
                 guard let client = clients[provider] else { continue }
                 group.addTask {
-                    await (provider, Self.fetchWithBudget(client))
+                    await (provider, client.fetchWithinBudget())
                 }
             }
             for await (provider, result) in group {
+                // Cancelled for a newer refresh: checks cut short aren't failures, and don't
+                // count as attempts, so the next refresh asks again.
+                if Task.isCancelled, case .failure = result {
+                    lastAttemptAt[provider] = earlierAttempts[provider]
+                    continue
+                }
                 apply(provider: provider, result: result)
             }
         }
+        guard !Task.isCancelled else {
+            isRefreshing = false
+            return
+        }
+        for provider in resting {
+            // The kept reading dates from when its values first appeared; a between-calls
+            // reading has to be newer than the last check.
+            var previous = statuses[provider]?.snapshot
+            if let kept = previous?.fetchedAt, let checked = checkedAt[provider], checked > kept {
+                previous?.fetchedAt = checked
+            }
+            guard let client = clients[provider],
+                  let snapshot = await client.fetchBetweenCalls(previous: previous)
+            else { continue }
+            apply(provider: provider, result: .success(snapshot))
+        }
         persistLiveSnapshots()
+        cache.saveChecked(checkedAt)
         history.saveIfNeeded()
         isRefreshing = false
         let envelope = relayEnvelope(at: now)
@@ -156,19 +195,63 @@ final class QuotaStore {
         let relayed = Provider.allCases.filter { settings.isEnabled($0) }
         await relay?.publishHistory(history.relayHistory(for: relayed), now: now)
         await sendAlerts(for: envelope.providers, now: now)
+        await refreshNews(now: now)
+    }
+
+    /// Checks News when it's turned on; the fetcher only goes out when a feed is due.
+    func refreshNews(force: Bool = false, now: Date = .now) async {
+        guard settings.newsEnabled, let news else { return }
+        await news.refresh(maxAge: force ? 0 : nil, preferences: settings.alertPreferences, notifies: settings.showsAlertsOnMac, now: now)
     }
 
     /// Alerts for crossings since the last refresh: to the iPhone through iCloud, and on this Mac
-    /// when turned on. Each goes out once, from whichever device saw it first.
+    /// when turned on. Each goes out once, from whichever device saw it first. Alerts that can
+    /// wait hold until quiet hours end, and ones iCloud didn't take are retried next time.
     private func sendAlerts(for providers: [RelayProvider], now: Date) async {
-        let preferences = await relay?.alertPreferences(now: now) ?? AlertPreferences()
-        let alerts = alertLedger.process(providers, preferences: preferences, now: now)
-        alertLedger.save(to: cache.directory)
-        guard !alerts.isEmpty else { return }
-        await relay?.sendAlerts(alerts, preferences: preferences, now: now)
-        if settings.showsAlertsOnMac {
-            MacAlerts.post(alerts.filter { preferences.shouldSend($0, at: now) })
+        let preferences = await currentAlertPreferences(now: now)
+        alertLedger.process(providers, preferences: preferences, now: now)
+        let due = alertLedger.due(preferences: preferences, now: now)
+        guard !due.isEmpty else {
+            alertLedger.save(to: cache.directory)
+            return
         }
+        let relayActive = relay.map { $0.isAvailable && $0.isEnabled } ?? false
+        var delivered: [String] = []
+        if relayActive, let relay {
+            delivered = await relay.sendAlerts(due, now: now)
+        }
+        if settings.showsAlertsOnMac {
+            let unseen = due.filter { alertLedger.shownHere[$0.id] == nil }
+            MacAlerts.post(unseen)
+            alertLedger.markShownHere(unseen.map(\.id), at: now)
+        }
+        if !relayActive {
+            // Nowhere else to send them: this Mac showed them, or nothing will.
+            delivered = due.map(\.id)
+        }
+        alertLedger.markSent(delivered, at: now)
+        alertLedger.save(to: cache.directory)
+    }
+
+    /// The newer of this Mac's alert preferences and the shared copy; adopts the shared one when
+    /// the iPhone changed it last, so Settings shows it.
+    func currentAlertPreferences(now: Date = .now) async -> AlertPreferences {
+        let local = settings.alertPreferences
+        let preferences = await relay?.alertPreferences(local: local, now: now) ?? local
+        if preferences != local {
+            settings.alertPreferences = preferences
+        }
+        return preferences
+    }
+
+    /// Alert choices changed in Settings on this Mac.
+    func updateAlertPreferences(_ change: (inout AlertPreferences) -> Void, now: Date = .now) {
+        var preferences = settings.alertPreferences
+        change(&preferences)
+        guard preferences != settings.alertPreferences else { return }
+        preferences.touch(now: now)
+        settings.alertPreferences = preferences
+        Task { await relay?.publishAlertPreferences(preferences, now: now) }
     }
 
     /// Pace of a provider's primary window, from its recent readings.
@@ -187,10 +270,57 @@ final class QuotaStore {
         )
     }
 
+    /// Pace for every window of a provider, keyed by window ID.
+    func windowPaces(for provider: Provider, now: Date = .now) -> [String: Pace] {
+        let status = statuses[provider] ?? .loading
+        guard let snapshot = status.snapshot else { return [:] }
+        var paces: [String: Pace] = [:]
+        for window in snapshot.windows {
+            let pace = Pace.evaluate(
+                used: window.usedPercent,
+                kind: window.kind,
+                resetsAt: window.resetsAt,
+                startsAt: window.startsAt,
+                windowSeconds: window.windowSeconds,
+                samples: history.samples(provider: provider, window: window.id),
+                isStale: status.isStale,
+                now: now
+            )
+            paces[window.id] = pace
+        }
+        return paces
+    }
+
+    /// A week of hourly usage per window of a provider, keyed by window ID.
+    func weeks(for provider: Provider) -> [String: UsageHistory] {
+        history.weeks(for: provider)
+    }
+
+    /// Banked resets across providers, for the popover's footer.
+    var bankedResets: (count: Int, providers: [Provider]) {
+        var count = 0
+        var providers: [Provider] = []
+        for provider in connectedProviders {
+            if let available = statuses[provider]?.snapshot?.banked?.available, available > 0 {
+                count += available
+                providers.append(provider)
+            }
+        }
+        return (count, providers)
+    }
+
     /// Enabled providers as the iPhone and Watch will see them.
     func relayEnvelope(at now: Date) -> RelayEnvelope {
         let providers = Provider.allCases.filter { settings.isEnabled($0) }.map { provider in
-            RelayProvider(provider: provider, status: statuses[provider] ?? .loading, checkedAt: checkedAt[provider])
+            var relayed = RelayProvider(provider: provider, status: statuses[provider] ?? .loading, checkedAt: checkedAt[provider])
+            // The pace this Mac measured from its frequent readings, for readers with hourly history.
+            let paces = relayed.isLive ? windowPaces(for: provider, now: now) : [:]
+            for index in relayed.windows.indices where relayed.windows[index].isMetered {
+                if let pace = paces[relayed.windows[index].id] {
+                    relayed.windows[index].pace = RelayPace(runsOutAt: pace.runsOutAt)
+                }
+            }
+            return relayed
         }
         return RelayEnvelope(
             producer: "mac",
@@ -243,7 +373,7 @@ final class QuotaStore {
 
     /// Enabled providers waiting for a sign-in or key, collapsed at the bottom.
     var disconnectedProviders: [Provider] {
-        popoverProviders.filter(isDisconnected)
+        popoverProviders.filter { isDisconnected($0) }
     }
 
     private func isDisconnected(_ provider: Provider) -> Bool {
@@ -277,6 +407,17 @@ final class QuotaStore {
     /// Last successful check for a provider, falling back to when its reading was taken.
     func lastChecked(_ provider: Provider) -> Date? {
         checkedAt[provider] ?? statuses[provider]?.snapshot?.fetchedAt
+    }
+
+    /// When a provider's usage last changed: its reading keeps the time it first appeared,
+    /// because an unchanged answer doesn't replace it.
+    func lastChanged(_ provider: Provider) -> Date? {
+        statuses[provider]?.snapshot?.fetchedAt
+    }
+
+    /// The currency a provider's budget or reference is entered in, from its last reading.
+    func budgetCurrency(for provider: Provider) -> String {
+        (rawSnapshots[provider] ?? statuses[provider]?.snapshot)?.budgetCurrencyCode ?? "USD"
     }
 
     /// Re-applies the provider's budget to its last reading.
@@ -315,27 +456,6 @@ final class QuotaStore {
         TokenroomFormat.percentText(value)
     }
 
-    private static func fetchWithBudget(_ client: any ProviderClient) async -> Result<QuotaSnapshot, ProviderError> {
-        await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
-            group.addTask { await client.fetch() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(client.fetchBudget * 1_000_000_000))
-                return nil
-            }
-            var result: Result<QuotaSnapshot, ProviderError> = .failure(.unreachable)
-            while let next = await group.next() {
-                if let next {
-                    result = next
-                    group.cancelAll()
-                    break
-                }
-                group.cancelAll()
-                break
-            }
-            return result
-        }
-    }
-
     private func apply(provider: Provider, result: Result<QuotaSnapshot, ProviderError>, now: Date = .now) {
         switch result {
         case .success(let raw):
@@ -367,13 +487,16 @@ final class QuotaStore {
         ProviderStatus.clampedRetry(until, now: now)
     }
 
-    private static func usageEqual(_ a: QuotaSnapshot, _ b: QuotaSnapshot) -> Bool {
-        a.provider == b.provider
-            && a.usedPercent == b.usedPercent
-            && a.resetsAt == b.resetsAt
-            && a.primaryTitle == b.primaryTitle
-            && a.windows == b.windows
-            && a.planLabel == b.planLabel
+    /// Whether a new reading says nothing the kept one doesn't: every field but when it was
+    /// fetched and where from, so a newly banked reset, credits, or extra usage replace it even
+    /// when the meters haven't moved, while the same values from Claude's status line and its
+    /// direct call don't take turns. The kept reading's `fetchedAt` stays the time its values
+    /// first appeared.
+    nonisolated static func usageEqual(_ a: QuotaSnapshot, _ b: QuotaSnapshot) -> Bool {
+        var a = a
+        a.fetchedAt = b.fetchedAt
+        a.source = b.source
+        return a == b
     }
 
     private func persistLiveSnapshots() {

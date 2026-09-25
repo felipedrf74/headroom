@@ -37,7 +37,7 @@ struct ComplicationProvider: TimelineProvider {
             let entries = ([now] + resets.sorted().prefix(11)).map { date in
                 ComplicationEntry(date: date, items: (cache?.items ?? []).map { $0.rolledOver(at: date) })
             }
-            completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
+            completion(Timeline(entries: entries, policy: .after(WidgetSchedule.nextReload(after: now, items: cache?.items ?? []))))
         }
     }
 }
@@ -59,6 +59,18 @@ private struct ComplicationView: View {
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
+        content
+            .widgetURL(link)
+    }
+
+    /// Circular and corner complications show one provider and open it; the rest open the list.
+    private var link: URL? {
+        guard let first = entry.items.first, family == .accessoryCircular || family == .accessoryCorner else { return nil }
+        return DeepLink.provider(first.id).url
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let first = entry.items.first {
             let window = first.provider.primaryWindow
             let used = min(max(window?.used ?? 0, 0), 100)
@@ -136,19 +148,31 @@ struct ResetSoonEntry: RelevanceEntry {
     var windowID: String?
 }
 
-/// Relevant in the Smart Stack for the last 8 hours before a session or a busy window resets.
+/// Relevant in the Smart Stack for the last 8 hours before a session or a busy window resets,
+/// and for the next half day whenever a window is at 80% or more.
 struct ResetSoonProvider: RelevanceEntriesProvider {
+    static let busyUse = 80.0
+    static let busySpan: TimeInterval = 12 * 3600
+
     func relevance() async -> WidgetRelevance<WindowIntent> {
         let now = Date.now
         let items = ReadingCache.defaultURL.flatMap(ReadingCache.load)?.items ?? []
         var attributes: [WidgetRelevanceAttribute<WindowIntent>] = []
-        for item in items {
-            guard let window = item.provider.windowToFollow(now: now), let resetsAt = window.resetsAt else { continue }
-            let start = max(now, resetsAt.addingTimeInterval(-RelayProvider.followHorizon))
-            attributes.append(WidgetRelevanceAttribute(
-                configuration: WindowIntent(providerID: item.id, windowID: window.id),
-                context: .date(from: start, to: resetsAt)
-            ))
+        for item in items where item.provider.isLive {
+            if let window = item.provider.windowToFollow(now: now), let resetsAt = window.resetsAt {
+                let start = max(now, resetsAt.addingTimeInterval(-RelayProvider.followHorizon))
+                attributes.append(WidgetRelevanceAttribute(
+                    configuration: WindowIntent(providerID: item.id, windowID: window.id),
+                    context: .date(range: start...resetsAt, kind: .default)
+                ))
+            } else if let window = item.provider.windows.filter({ $0.isMetered && $0.used >= Self.busyUse }).max(by: { $0.used < $1.used }) {
+                let end = min(window.resetsAt ?? now.addingTimeInterval(Self.busySpan), now.addingTimeInterval(Self.busySpan))
+                guard end > now else { continue }
+                attributes.append(WidgetRelevanceAttribute(
+                    configuration: WindowIntent(providerID: item.id, windowID: window.id),
+                    context: .date(range: now...end, kind: .default)
+                ))
+            }
         }
         return WidgetRelevance(attributes)
     }
@@ -170,7 +194,7 @@ struct ResetSoonWidget: Widget {
             ResetSoonView(entry: entry)
         }
         .configurationDisplayName("Resets Soon")
-        .description("Shows up in the Smart Stack as a busy window nears its reset.")
+        .description("Shows up in the Smart Stack when a limit is at 80% or nears its reset.")
     }
 }
 
@@ -185,6 +209,7 @@ private struct ResetSoonView: View {
                     Text("\(item.provider.shortName) \(window.title.lowercased()) \(ReadingText.headline(window))")
                         .font(.headline)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     if let resetsAt = window.resetsAt, resetsAt > .now {
                         Text("Resets in \(Text(resetsAt, style: .relative))")
                             .font(.caption)

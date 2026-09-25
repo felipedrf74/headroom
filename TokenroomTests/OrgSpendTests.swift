@@ -62,6 +62,42 @@ final class OrgSpendTests: XCTestCase {
         XCTAssertEqual(credits.applyingBudget(100).usedPercent, 4.5, accuracy: 0.001, "Balances measure what's left, not lifetime use")
     }
 
+    func testABudgetIsInTheFirstBalancesCurrency() throws {
+        let balance = try DeepSeekParser.snapshot(from: fixture("deepseek-balance"))
+        XCTAssertEqual(balance.budgetUnit, "usd")
+        XCTAssertEqual(balance.budgetCurrencyCode, "USD")
+        let budgeted = balance.applyingBudget(50)
+        let dollars = budgeted.windows[0]
+        XCTAssertTrue(dollars.isMetered)
+        XCTAssertEqual(dollars.amount?.used ?? 0, 37.6, accuracy: 0.001, "Spent from the $50 reference, not a lifetime total")
+        XCTAssertEqual(dollars.amount?.limit, 50)
+        XCTAssertEqual(dollars.amount?.remaining, 12.4)
+        XCTAssertEqual(ReadingText.amountDetail(try XCTUnwrap(dollars.amount)), "\(AmountFormat.text(37.6, unit: "usd")) of \(AmountFormat.text(50, unit: "usd"))")
+        XCTAssertEqual(budgeted.windows[1], balance.windows[1], "A yuan balance isn't measured against a dollar budget")
+
+        let china = try MoonshotParser.snapshot(from: fixture("moonshot-balance"), region: "China")
+        XCTAssertEqual(china.budgetCurrencyCode, "CNY")
+        let reference = china.applyingBudget(100)
+        XCTAssertEqual(reference.usedPercent, 100 - 49.58894, accuracy: 0.001)
+        XCTAssertEqual(reference.windows[0].amount?.unit, "cny")
+        XCTAssertEqual(reference.windows[0].amount?.used ?? 0, 100 - 49.58894, accuracy: 0.001)
+
+        let spend = OrgSpend.snapshot(.openaiOrg, window: OrgSpend.spendWindow(250, now: now), fetchedAt: now)
+        XCTAssertEqual(spend.budgetCurrencyCode, "USD")
+        XCTAssertEqual(spend.applyingBudget(1000).windows[0].amount?.used, 250, "Spend keeps what was spent")
+        let plain = QuotaSnapshot(provider: .claude, usedPercent: 0, resetsAt: nil, fetchedAt: now, primaryTitle: "Weekly", windows: [])
+        XCTAssertNil(plain.budgetUnit)
+        XCTAssertEqual(plain.budgetCurrencyCode, "USD")
+    }
+
+    func testAmountsSayWhatIsLeftOrSpent() {
+        XCTAssertEqual(ReadingText.amountHeadline(QuotaAmount(remaining: 12.4, unit: "usd")), "\(AmountFormat.text(12.4, unit: "usd")) left")
+        XCTAssertEqual(ReadingText.amountHeadline(QuotaAmount(used: 37.6, limit: 50, unit: "usd")), "\(AmountFormat.text(12.4, unit: "usd")) left", "Worked out from a limit")
+        XCTAssertEqual(ReadingText.amountHeadline(QuotaAmount(remaining: 80, unit: "cny")), "\(AmountFormat.text(80, unit: "cny")) left")
+        XCTAssertEqual(ReadingText.amountHeadline(QuotaAmount(used: 312.5, unit: "usd")), "\(AmountFormat.text(312.5, unit: "usd")) spent")
+        XCTAssertNil(ReadingText.amountHeadline(QuotaAmount(unit: "usd")))
+    }
+
     func testBudgetLeavesMeteredWindowsAndMissingBudgetsAlone() throws {
         let metered = try OpenRouterParser.snapshot(from: fixture("openrouter-limited"), fetchedAt: now)
         XCTAssertEqual(metered.applyingBudget(10), metered)

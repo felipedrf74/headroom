@@ -1,43 +1,105 @@
 import AppKit
 import SwiftUI
 
+enum SettingsTab: String {
+    case general
+    case providers
+    case keys
+    case alerts
+    case news
+    case menuBar
+    case iPhone
+}
+
+/// Which tab Settings shows; the app sets it before opening Settings from elsewhere.
+@Observable
+@MainActor
+final class SettingsTabRequest {
+    var tab: SettingsTab = .providers
+}
+
 struct SettingsView: View {
     @Bindable var store: QuotaStore
-    @State private var tab = "providers"
+    @Bindable var request: SettingsTabRequest
 
     var body: some View {
-        TabView(selection: $tab) {
-            ProvidersSettings(store: store)
+        TabView(selection: $request.tab) {
+            GeneralSettings(store: store)
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
+            ProvidersSettings(store: store) { request.tab = .keys }
                 .tabItem { Label("Providers", systemImage: "square.stack.3d.up") }
-                .tag("providers")
+                .tag(SettingsTab.providers)
+            KeysSettings(store: store)
+                .tabItem { Label("API Keys", systemImage: "key") }
+                .tag(SettingsTab.keys)
+            AlertsSettings(store: store)
+                .tabItem { Label("Alerts", systemImage: "bell.badge") }
+                .tag(SettingsTab.alerts)
+            NewsSettings(store: store)
+                .tabItem { Label("News", systemImage: "newspaper") }
+                .tag(SettingsTab.news)
             MenuBarSettings(store: store)
                 .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
-                .tag("menubar")
+                .tag(SettingsTab.menuBar)
             if let relay = store.relay {
                 Form {
                     RelaySettingsSection(relay: relay)
-                    MacAlertsSection(settings: store.settings)
                 }
                 .formStyle(.grouped)
                 .tabItem { Label("iPhone & Watch", systemImage: "iphone.gen3") }
-                .tag("iphone")
+                .tag(SettingsTab.iPhone)
             }
-            Form {
+        }
+        .frame(minWidth: 580, idealWidth: 600, minHeight: 560)
+        .navigationTitle("Settings")
+        .onChange(of: store.pendingKeyProvider, initial: true) { _, provider in
+            if provider != nil {
+                request.tab = .keys
+            }
+        }
+    }
+}
+
+// MARK: General
+
+private struct GeneralSettings: View {
+    @Bindable var store: QuotaStore
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Launch at login", isOn: $store.settings.launchAtLogin)
+            }
+            if let legacy = LegacyMigration.legacyAppURL {
                 Section {
-                    Toggle("Launch at login", isOn: $store.settings.launchAtLogin)
+                    Text("Headroom is still on this Mac. Quit it, remove it from Login Items in System Settings › General, and move it to the Trash.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        if LegacyMigration.isLegacyAppRunning {
+                            Button("Quit Headroom") { store.quitLegacyApp() }
+                        }
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([legacy])
+                        }
+                    }
+                } header: {
+                    Text("Headroom")
                 }
             }
-            .formStyle(.grouped)
-            .tabItem { Label("General", systemImage: "gearshape") }
-            .tag("general")
-        }
-        .frame(minWidth: 460, idealWidth: 480, minHeight: 520)
-        .navigationTitle("Settings")
-        .onChange(of: store.pendingKeyProvider) { _, provider in
-            if provider != nil {
-                tab = "providers"
+            Section {
+                LabeledContent("Version", value: TokenroomIdentity.version)
+                Link("Privacy", destination: TokenroomIdentity.privacyURL)
+                Link("Source code", destination: TokenroomIdentity.repositoryURL)
+            } header: {
+                Text("About")
+            } footer: {
+                Text("Tokenroom isn't affiliated with any of the providers it shows.")
             }
         }
+        .formStyle(.grouped)
     }
 }
 
@@ -45,101 +107,88 @@ struct SettingsView: View {
 
 private struct ProvidersSettings: View {
     @Bindable var store: QuotaStore
-    @State private var keySheet: Provider?
+    var onManageKeys: () -> Void
+    /// Providers signed in or configured on this Mac, checked off the main thread.
+    @State private var detected: Set<Provider> = []
 
     var body: some View {
         Form {
-            Section {
-                ForEach(Provider.allCases.filter { !$0.usesAPIKey }) { provider in
-                    VStack(alignment: .leading, spacing: 8) {
-                        providerToggle(provider)
-                        signInActions(provider)
-                        if provider == .claude {
-                            ClaudeBridgeRow()
-                                .padding(.leading, 28)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            } header: {
-                Text("Subscriptions")
-            } footer: {
-                Text("Tokenroom reuses the login you already have for each tool and never refreshes it. Tokens, names, and emails are never stored or sent anywhere.")
-            }
+            let personal = Provider.allCases.filter { $0.category != .orgSpend }
+            let connected = personal.filter { store.settings.isEnabled($0) }
+            let detectedOff = personal.filter { !store.settings.isEnabled($0) && detected.contains($0) }
+            let available = personal.filter { !store.settings.isEnabled($0) && !detected.contains($0) }
 
-            Section {
-                ForEach(Provider.allCases.filter { $0.access == .codingPlanKey }) { provider in
-                    VStack(alignment: .leading, spacing: 8) {
-                        providerToggle(provider)
-                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
-                            keySheet = provider
-                        } onRemoved: {
-                            // A key the coding tool keeps may still be there.
-                            Task { await store.refresh(force: true, providers: [provider]) }
-                        }
-                        .padding(.leading, 28)
-                    }
-                    .padding(.vertical, 2)
+            if !connected.isEmpty {
+                Section {
+                    ForEach(connected) { providerRow($0) }
+                } header: {
+                    Text("Connected")
+                } footer: {
+                    Text("Tokenroom reuses the login you already have for each tool and never refreshes it. Tokens, names, and emails are never stored or sent anywhere. Tools you sign in to are read from the same endpoints their own apps use: unofficial, and they can change without notice.")
                 }
-            } header: {
-                Text("Coding plans")
-            } footer: {
-                Text("Tokenroom uses the key your coding tool already has on this Mac (Claude Code settings, the kimi CLI, or OpenCode), or one you add here. Added keys stay in this Mac's Keychain.")
             }
-
-            Section {
-                ForEach(Provider.allCases.filter { $0.category == .apiBalance }) { provider in
-                    keyedProvider(provider, budgetLabel: "Budget")
+            if !detectedOff.isEmpty {
+                Section {
+                    ForEach(detectedOff) { providerRow($0) }
+                } header: {
+                    Text("Detected on this Mac")
+                } footer: {
+                    Text("Signed in or set up on this Mac. Turn one on to see its usage.")
                 }
-            } header: {
-                Text("Pay as you go")
-            } footer: {
-                Text("API keys stay in this Mac's Keychain. They're never synced or sent to your iPhone; only the readings are. A budget turns a balance or spend into a meter.")
             }
-
-            Section {
-                ForEach(Provider.allCases.filter { $0.category == .orgSpend }) { provider in
-                    keyedProvider(provider, budgetLabel: "Monthly budget")
+            if !available.isEmpty {
+                Section("Available") {
+                    ForEach(available) { providerRow($0) }
                 }
+            }
+            Section {
+                ForEach(Provider.allCases.filter { $0.category == .orgSpend }) { providerRow($0) }
             } header: {
                 Text("Organization billing")
             } footer: {
-                Text("Admin and management keys can change your organization. Tokenroom only reads cost and billing with them. Create a dedicated key you can revoke.")
+                Text("Month-to-date spend with an admin or management key. These never turn on by themselves; add a dedicated key you can revoke in API Keys.")
             }
         }
         .formStyle(.grouped)
-        .sheet(item: $keySheet) { provider in
-            AddKeySheet(provider: provider, keys: CredentialReaders.apiKeys) {
-                store.settings.setEnabled(provider, true)
-                Task { await store.refresh(force: true, providers: [provider]) }
+        .task {
+            detected = await BlockingIO.run {
+                Set(Provider.allCases.filter { CredentialReaders.hasSession($0) })
             }
-        }
-        .onChange(of: store.pendingKeyProvider, initial: true) { _, provider in
-            guard let provider else { return }
-            keySheet = provider
-            store.pendingKeyProvider = nil
         }
     }
 
-    private func keyedProvider(_ provider: Provider, budgetLabel: String) -> some View {
+    private func providerRow(_ provider: Provider) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             providerToggle(provider)
-            KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
-                keySheet = provider
-            } onRemoved: {
-                store.settings.setEnabled(provider, false)
-            }
-            .padding(.leading, 28)
-            BudgetField(label: budgetLabel, value: Binding(
-                get: { store.settings.budget(for: provider) },
-                set: { value in
-                    store.settings.setBudget(value, for: provider)
-                    store.budgetDidChange(for: provider)
+            if provider.usesAPIKey {
+                if needsKey(provider) {
+                    Button("Add a key in API Keys", action: onManageKeys)
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .padding(.leading, 28)
                 }
-            ))
-            .padding(.leading, 28)
+            } else {
+                signInActions(provider)
+            }
+            if provider == .claude {
+                ClaudeBridgeRow()
+                    .padding(.leading, 28)
+            }
+            if provider == .claude {
+                Text("Unofficial: read from the same endpoint \(provider.toolName) uses. It can change without notice.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 28)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    private func needsKey(_ provider: Provider) -> Bool {
+        guard store.settings.isEnabled(provider) else { return false }
+        if case .signedOut = store.statuses[provider] ?? .loading { return true }
+        return false
     }
 
     private func providerToggle(_ provider: Provider) -> some View {
@@ -151,7 +200,7 @@ private struct ProvidersSettings: View {
                 ProviderIcon(provider: provider, size: 20)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider.displayName)
-                    Text(store.accountCaption(provider))
+                    Text(caption(provider))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -159,10 +208,21 @@ private struct ProvidersSettings: View {
         }
     }
 
+    private func caption(_ provider: Provider) -> String {
+        if store.settings.isEnabled(provider) {
+            return store.accountCaption(provider)
+        }
+        if detected.contains(provider) {
+            return provider.usesAPIKey ? "Key found on this Mac" : "Signed in on this Mac"
+        }
+        return provider.usesAPIKey ? "Needs an API key" : "Sign in with \(provider.installToolName)"
+    }
+
     @ViewBuilder
     private func signInActions(_ provider: Provider) -> some View {
         let status = store.statuses[provider] ?? .loading
         let needsSignIn: Bool = {
+            guard store.settings.isEnabled(provider) else { return false }
             switch status {
             case .signedOut, .expired, .unreachable(nil):
                 return true
@@ -208,6 +268,121 @@ private struct ProvidersSettings: View {
     }
 }
 
+// MARK: API keys
+
+private struct KeysSettings: View {
+    @Bindable var store: QuotaStore
+    @State private var keySheet: Provider?
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(Provider.allCases.filter { $0.access == .codingPlanKey }) { provider in
+                    VStack(alignment: .leading, spacing: 8) {
+                        keyHeader(provider)
+                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                            keySheet = provider
+                        } onRemoved: {
+                            // A key the coding tool keeps may still be there.
+                            Task { await store.refresh(force: true, providers: [provider]) }
+                        }
+                        .padding(.leading, 28)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("Coding plans")
+            } footer: {
+                Text("Tokenroom uses the key your coding tool already has on this Mac (Claude Code settings, the kimi CLI, or OpenCode), or one you add here. Added keys stay in this Mac's Keychain.")
+            }
+
+            Section {
+                ForEach(Provider.allCases.filter { $0.descriptor.fallbackKey != nil }) { provider in
+                    VStack(alignment: .leading, spacing: 8) {
+                        keyHeader(provider)
+                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                            keySheet = provider
+                        } onRemoved: {
+                            Task { await store.refresh(force: true, providers: [provider]) }
+                        }
+                        .padding(.leading, 28)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("Official APIs")
+            } footer: {
+                Text("Used when the app's own login is missing or refused: GitHub's documented billing API reads Copilot's AI credits with a fine-grained token.")
+            }
+
+            Section {
+                ForEach(Provider.allCases.filter { $0.category == .apiBalance }) { provider in
+                    keyedProvider(provider, budgetLabel: "Reference")
+                }
+            } header: {
+                Text("Pay as you go")
+            } footer: {
+                Text("API keys stay in this Mac's Keychain. They're never synced or sent to your iPhone; only the readings are. A reference amount in the key's currency turns a balance into a meter.")
+            }
+
+            Section {
+                ForEach(Provider.allCases.filter { $0.category == .orgSpend }) { provider in
+                    keyedProvider(provider, budgetLabel: "Monthly budget")
+                }
+            } header: {
+                Text("Organization billing")
+            } footer: {
+                Text("Admin and management keys can change your organization. Tokenroom only reads cost and billing with them. Create a dedicated key you can revoke.")
+            }
+        }
+        .formStyle(.grouped)
+        .sheet(item: $keySheet) { provider in
+            AddKeySheet(provider: provider, keys: CredentialReaders.apiKeys) {
+                store.settings.setEnabled(provider, true)
+                Task { await store.refresh(force: true, providers: [provider]) }
+            }
+        }
+        .onChange(of: store.pendingKeyProvider, initial: true) { _, provider in
+            guard let provider else { return }
+            keySheet = provider
+            store.pendingKeyProvider = nil
+        }
+    }
+
+    private func keyHeader(_ provider: Provider) -> some View {
+        HStack(spacing: 8) {
+            ProviderIcon(provider: provider, size: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(provider.displayName)
+                Text(store.settings.isEnabled(provider) ? store.accountCaption(provider) : "Off")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func keyedProvider(_ provider: Provider, budgetLabel: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            keyHeader(provider)
+            KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                keySheet = provider
+            } onRemoved: {
+                store.settings.setEnabled(provider, false)
+            }
+            .padding(.leading, 28)
+            BudgetField(label: budgetLabel, currency: store.budgetCurrency(for: provider), value: Binding(
+                get: { store.settings.budget(for: provider) },
+                set: { value in
+                    store.settings.setBudget(value, for: provider)
+                    store.budgetDidChange(for: provider)
+                }
+            ))
+            .padding(.leading, 28)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 /// A pasted key: `•••• a1b2` with Replace and Remove, or Add Key.
 private struct KeyRow: View {
     var provider: Provider
@@ -244,6 +419,12 @@ private struct KeyRow: View {
                         .controlSize(.small)
                 }
             }
+            if let warning = metadata?.warning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TokenroomTokens.tight)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let message {
                 Text(message)
                     .font(.system(size: 11))
@@ -271,9 +452,10 @@ private struct KeyRow: View {
     }
 }
 
-/// A dollar amount; empty means no budget.
+/// An amount in the key's currency; empty means no reference or budget.
 private struct BudgetField: View {
     var label: String
+    var currency: String
     @Binding var value: Double?
 
     var body: some View {
@@ -281,7 +463,7 @@ private struct BudgetField: View {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            TextField("None", value: $value, format: .currency(code: "USD"))
+            TextField("None", value: $value, format: .currency(code: currency))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11))
                 .frame(width: 110)
@@ -301,33 +483,41 @@ private struct AddKeySheet: View {
     @State private var message: String?
     @State private var offerSaveAnyway = false
     @State private var acknowledgedAdmin = false
+    /// Set when a test shows the key can change things (an xAI key with write access).
+    @State private var warning: String?
 
     init(provider: Provider, keys: APIKeyStore, onSaved: @escaping () -> Void) {
         self.provider = provider
         self.keys = keys
         self.onSaved = onSaved
-        _region = State(initialValue: provider.key?.regions.first ?? "")
+        _region = State(initialValue: provider.keySpec?.regions.first ?? "")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 ProviderIcon(provider: provider, size: 28)
-                Text("Add \(provider.displayName) \(provider.key?.label ?? "API key")")
+                Text("Add \(provider.displayName) \(provider.keySpec?.label ?? "API key")")
                     .font(.headline)
             }
-            SecureField(provider.key?.prefixHint.isEmpty == false ? "\(provider.key!.prefixHint)…" : "Paste your key", text: $key)
+            SecureField(provider.keySpec?.prefixHint.isEmpty == false ? "\(provider.keySpec!.prefixHint)…" : "Paste your key", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 320)
-            if let regions = provider.key?.regions, !regions.isEmpty {
-                Picker("Account", selection: $region) {
+            if let regions = provider.keySpec?.regions, !regions.isEmpty {
+                Picker(provider.keySpec?.choiceLabel ?? "Account", selection: $region) {
                     ForEach(regions, id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
-            if let url = provider.key?.createURL {
-                Link("Create a key", destination: url)
+            if let url = provider.keySpec?.createURL {
+                Link("Create a \(provider.keySpec?.label ?? "key")", destination: url)
                     .font(.system(size: 11))
+            }
+            if let note = provider.keySpec?.note {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if provider.key?.isAdmin == true {
                 VStack(alignment: .leading, spacing: 6) {
@@ -341,6 +531,12 @@ private struct AddKeySheet: View {
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.orange.opacity(0.12)))
             }
+            if let warning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TokenroomTokens.tight)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(message ?? "Tokenroom only reads your balance and usage with this key. It stays in this Mac's Keychain.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -352,13 +548,19 @@ private struct AddKeySheet: View {
                 if offerSaveAnyway {
                     Button("Save Anyway") { save() }
                 }
-                Button(working ? "Testing…" : "Test & Save") { test() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || working || (provider.key?.isAdmin == true && !acknowledgedAdmin))
+                Button(working ? "Testing…" : (warning == nil ? "Test & Save" : "Save With This Key")) {
+                    warning == nil ? test() : save()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || working || (provider.key?.isAdmin == true && !acknowledgedAdmin))
             }
         }
         .padding(20)
         .frame(width: 420)
+        .onChange(of: key) { _, _ in
+            // A different key needs its own test.
+            warning = nil
+        }
     }
 
     private var regionValue: String? {
@@ -374,10 +576,14 @@ private struct AddKeySheet: View {
         let region = regionValue
         Task {
             do {
-                _ = try await APIKeyClient.snapshot(for: provider, key: key, region: region)
-                save()
+                let check = try await APIKeyClient.check(for: provider, key: key, region: region)
+                if let found = check.warning {
+                    warning = found
+                } else {
+                    save()
+                }
             } catch ProviderError.expired {
-                message = provider.key?.regions.isEmpty == false
+                message = provider.keySpec?.regions.isEmpty == false
                     ? "Couldn't use this key. Check it, and the account it belongs to, and try again."
                     : "Couldn't use this key. Check it and try again."
             } catch ProviderError.notEntitled(let reason) {
@@ -395,12 +601,161 @@ private struct AddKeySheet: View {
 
     private func save() {
         do {
-            try keys.save(key, for: provider, region: regionValue)
+            try keys.save(key.trimmingCharacters(in: .whitespacesAndNewlines), for: provider, region: regionValue, warning: warning)
             onSaved()
             dismiss()
         } catch {
             message = "Couldn't save the key in the Keychain."
         }
+    }
+}
+
+// MARK: Alerts
+
+private struct AlertsSettings: View {
+    @Bindable var store: QuotaStore
+    @State private var denied = false
+
+    private var preferences: AlertPreferences {
+        store.settings.alertPreferences
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Show alerts on this Mac", isOn: Binding(
+                    get: { store.settings.showsAlertsOnMac },
+                    set: { isOn in
+                        guard isOn else {
+                            store.settings.showsAlertsOnMac = false
+                            return
+                        }
+                        Task {
+                            let allowed = await MacAlerts.requestPermission()
+                            store.settings.showsAlertsOnMac = allowed
+                            denied = !allowed
+                        }
+                    }
+                ))
+            } header: {
+                Text("This Mac")
+            } footer: {
+                Text(denied
+                    ? "Notifications are off for Tokenroom. Turn them on in System Settings › Notifications."
+                    : "Your iPhone gets these through iCloud either way, once each, whichever device sees them first.")
+            }
+
+            Section {
+                ForEach(AlertPreferences.supportedThresholds, id: \.self) { level in
+                    Toggle("\(level)% of a limit is used", isOn: binding(
+                        get: { $0.thresholds.contains(level) },
+                        set: { preferences, isOn in
+                            if isOn {
+                                preferences.thresholds = Array(Set(preferences.thresholds + [level])).sorted()
+                            } else {
+                                preferences.thresholds.removeAll { $0 == level }
+                            }
+                        }
+                    ))
+                }
+                Toggle("A busy window resets", isOn: binding(get: \.resets, set: { $0.resets = $1 }))
+                Toggle("Banked resets arrive or are about to expire", isOn: binding(get: \.banked, set: { $0.banked = $1 }))
+                Toggle("A balance or budget runs low", isOn: binding(get: \.lowBalance, set: { $0.lowBalance = $1 }))
+                Toggle("New models from labs you follow", isOn: binding(get: \.newModels, set: { $0.newModels = $1 }))
+            } header: {
+                Text("Alert me when")
+            } footer: {
+                Text("Shared with Tokenroom on your iPhone through iCloud; a change on either device applies to both. Low balance alerts need a reference or budget in API Keys.")
+            }
+
+            Section {
+                Toggle("Quiet hours", isOn: binding(get: \.quietHours, set: { $0.quietHours = $1 }))
+                if preferences.quietHours {
+                    Picker("From", selection: binding(get: \.quietStartHour, set: { $0.quietStartHour = $1 })) {
+                        ForEach(0..<24, id: \.self) { Text(Self.hourText($0)).tag($0) }
+                    }
+                    Picker("Until", selection: binding(get: \.quietEndHour, set: { $0.quietEndHour = $1 })) {
+                        ForEach(0..<24, id: \.self) { Text(Self.hourText($0)).tag($0) }
+                    }
+                }
+            } footer: {
+                Text("Only 95% alerts and banked resets about to expire come through. The rest wait until quiet hours end.")
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            // Pick up changes made on the iPhone.
+            _ = await store.currentAlertPreferences()
+        }
+    }
+
+    private func binding<Value>(get: @escaping (AlertPreferences) -> Value, set: @escaping (inout AlertPreferences, Value) -> Void) -> Binding<Value> {
+        Binding(
+            get: { get(store.settings.alertPreferences) },
+            set: { value in store.updateAlertPreferences { set(&$0, value) } }
+        )
+    }
+
+    private func binding<Value>(get keyPath: KeyPath<AlertPreferences, Value>, set: @escaping (inout AlertPreferences, Value) -> Void) -> Binding<Value> {
+        binding(get: { $0[keyPath: keyPath] }, set: set)
+    }
+
+    static func hourText(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        let date = Calendar.current.date(from: components) ?? .now
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+// MARK: News
+
+private struct NewsSettings: View {
+    @Bindable var store: QuotaStore
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Check for new models and announcements", isOn: Binding(
+                    get: { store.settings.newsEnabled },
+                    set: { isOn in
+                        store.settings.newsEnabled = isOn
+                        if isOn {
+                            Task { await store.refreshNews(force: true) }
+                        }
+                    }
+                ))
+            } footer: {
+                Text("Reads OpenRouter's public model list every 6 hours and official changelogs and blogs every 12. No account, key, or usage is sent. Open News from the popover.")
+            }
+            if store.settings.newsEnabled, let news = store.news {
+                Section("Labs") {
+                    ForEach(news.vendorChoices, id: \.id) { vendor in
+                        Toggle(vendor.name, isOn: Binding(
+                            get: { news.followedVendors.contains(vendor.id) },
+                            set: { isOn in
+                                if isOn { news.followedVendors.insert(vendor.id) } else { news.followedVendors.remove(vendor.id) }
+                            }
+                        ))
+                    }
+                }
+                Section {
+                    ForEach(FeedSource.toggles) { source in
+                        Toggle(source.name, isOn: Binding(
+                            get: { news.followedSources.contains(source.id) },
+                            set: { isOn in
+                                if isOn { news.followedSources.insert(source.id) } else { news.followedSources.remove(source.id) }
+                            }
+                        ))
+                    }
+                } header: {
+                    Text("Announcements")
+                } footer: {
+                    Text("Official feeds only. Tokenroom shows titles and links, and opens the rest in your browser.")
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -481,40 +836,11 @@ private struct RelaySettingsSection: View {
     }
 }
 
-private struct MacAlertsSection: View {
-    @Bindable var settings: AppSettings
-    @State private var denied = false
-
-    var body: some View {
-        Section {
-            Toggle("Show usage alerts on this Mac", isOn: Binding(
-                get: { settings.showsAlertsOnMac },
-                set: { isOn in
-                    guard isOn else {
-                        settings.showsAlertsOnMac = false
-                        return
-                    }
-                    Task {
-                        let allowed = await MacAlerts.requestPermission()
-                        settings.showsAlertsOnMac = allowed
-                        denied = !allowed
-                    }
-                }
-            ))
-        } header: {
-            Text("Alerts")
-        } footer: {
-            Text(denied
-                ? "Notifications are off for Tokenroom. Turn them on in System Settings › Notifications."
-                : "Alerts at 80% and 95%, when a heavily used window resets, and for banked resets. Your iPhone gets them through iCloud, with its own choices and quiet hours.")
-        }
-    }
-}
-
 /// Opt-in: read Claude usage from Claude Code's own status line.
 private struct ClaudeBridgeRow: View {
     @State private var isOn = ClaudeStatusLineBridge.standard.isInstalled
     @State private var message: String?
+    @State private var overrides: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -527,6 +853,19 @@ private struct ClaudeBridgeRow: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if isOn, !overrides.isEmpty {
+                Text("\(overrides.count == 1 ? "A project sets" : "\(overrides.count) projects set") its own status line, which replaces the bridge there: \(overrides.joined(separator: ", ")). Tokenroom never edits project settings.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TokenroomTokens.tight)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .task(id: isOn) {
+            guard isOn else {
+                overrides = []
+                return
+            }
+            overrides = await BlockingIO.run { ClaudeStatusLineBridge.standard.projectOverrides().map(\.lastPathComponent) }
         }
     }
 

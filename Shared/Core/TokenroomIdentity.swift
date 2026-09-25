@@ -3,8 +3,8 @@ import Foundation
 enum TokenroomIdentity {
     static let bundleID = Bundle.main.bundleIdentifier ?? "app.tokenroom.mac"
     static let cacheFolderName = "Tokenroom"
-    /// The GitHub repository still lives at its pre-rename URL; GitHub redirects after a rename.
-    static let repositoryURL = URL(string: "https://github.com/felipedrf74/headroom")!
+    static let repositoryURL = URL(string: "https://github.com/felipedrf74/tokenroom")!
+    static let privacyURL = URL(string: "https://github.com/felipedrf74/tokenroom/blob/main/PRIVACY.md")!
 
     /// Headroom 1.x, which Tokenroom replaces.
     static let legacyBundleID = "app.headroom.mac"

@@ -54,3 +54,25 @@ struct ReadingCache: Codable, Equatable, Sendable {
         try RelayEnvelope.encoder.encode(self).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
+
+/// When widgets and complications ask for their next timeline: every 30 minutes while a live
+/// window is at 80% or more and resets within 12 hours, when fresh readings matter most,
+/// otherwise hourly. A month-long budget sitting at 85% doesn't need more. Countdowns tick and
+/// meters roll over at resets without a reload, and the apps reload widgets themselves when
+/// readings change, so a day stays under WidgetKit's budget of about 40 reloads.
+enum WidgetSchedule {
+    static let busyInterval: TimeInterval = 30 * 60
+    static let calmInterval: TimeInterval = 60 * 60
+    static let busyUse = 80.0
+    static let busyHorizon: TimeInterval = 12 * 3600
+
+    static func nextReload(after now: Date, items: [ReadingCache.Item]) -> Date {
+        let busy = items.map { $0.rolledOver(at: now) }.contains { item in
+            item.provider.isLive && item.provider.windows.contains { window in
+                guard window.isMetered, window.used >= busyUse, let resetsAt = window.resetsAt else { return false }
+                return resetsAt.timeIntervalSince(now) <= busyHorizon
+            }
+        }
+        return now.addingTimeInterval(busy ? busyInterval : calmInterval)
+    }
+}

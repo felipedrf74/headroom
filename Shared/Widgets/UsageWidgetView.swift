@@ -31,9 +31,10 @@ struct UsageWidgetView: View {
             case .accessoryCircular:
                 CircularWidget(item: first)
             case .accessoryRectangular:
-                RectangularWidget(items: Array(entry.items.prefix(3)))
+                RectangularWidget(items: Array(entry.items.prefix(3)), date: entry.date)
             case .accessoryInline:
                 InlineWidget(items: Array(entry.items.prefix(3)))
+                    .widgetURL(DeepLink.provider(first.id).url)
             default:
                 SmallWidget(entry: entry, item: first)
             }
@@ -115,7 +116,7 @@ private struct ListWidget: View {
             }
             ForEach(entry.items.prefix(count)) { item in
                 Link(destination: DeepLink.provider(item.id).url) {
-                    ListRow(item: item, showsHistory: showsHistory)
+                    ListRow(item: item, showsHistory: showsHistory, date: entry.date)
                 }
                 // Links tint their labels; rows keep their own colors.
                 .foregroundStyle(.primary)
@@ -128,6 +129,7 @@ private struct ListWidget: View {
 private struct ListRow: View {
     var item: ReadingCache.Item
     var showsHistory: Bool
+    var date: Date
 
     var body: some View {
         let provider = item.provider
@@ -135,11 +137,17 @@ private struct ListRow: View {
         HStack(spacing: 8) {
             MonogramMark(provider: provider, size: 20)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(provider.shortName)
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
                     Spacer(minLength: 4)
+                    if let resetsAt = window?.resetsAt, resetsAt > date {
+                        ResetCountdown(resetsAt: resetsAt, date: date)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Text(ReadingText.headline(window))
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .foregroundStyle(headlineStyle(window, isLive: provider.isLive))
@@ -185,25 +193,46 @@ private struct CircularWidget: View {
 
 private struct RectangularWidget: View {
     var items: [ReadingCache.Item]
+    var date: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(items) { item in
-                let used = item.provider.primaryWindow?.used ?? 0
-                HStack(spacing: 6) {
-                    Text(item.provider.shortName)
-                        .font(.caption2.weight(.semibold))
-                        .lineLimit(1)
-                        .frame(width: 58, alignment: .leading)
-                    Gauge(value: min(max(used, 0), 100), in: 0...100) {
-                        EmptyView()
+        ViewThatFits(in: .vertical) {
+            VStack(alignment: .leading, spacing: 2) {
+                rows
+                if let first = items.first, let resetsAt = first.provider.primaryWindow?.resetsAt, resetsAt > date {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text(first.provider.shortName)
+                        ResetCountdown(resetsAt: resetsAt, date: date)
+                            .monospacedDigit()
                     }
-                    .gaugeStyle(.accessoryLinearCapacity)
-                    .widgetAccentable()
-                    Text(ReadingText.headline(item.provider.primaryWindow))
-                        .font(.caption2.monospacedDigit())
-                        .lineLimit(1)
+                    .font(.caption2)
+                    .lineLimit(1)
                 }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                rows
+            }
+        }
+        .widgetURL(items.first.map { DeepLink.provider($0.id).url })
+    }
+
+    private var rows: some View {
+        ForEach(items) { item in
+            let used = item.provider.primaryWindow?.used ?? 0
+            HStack(spacing: 6) {
+                Text(item.provider.shortName)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .frame(width: 58, alignment: .leading)
+                Gauge(value: min(max(used, 0), 100), in: 0...100) {
+                    EmptyView()
+                }
+                .gaugeStyle(.accessoryLinearCapacity)
+                .widgetAccentable()
+                Text(ReadingText.headline(item.provider.primaryWindow))
+                    .font(.caption2.monospacedDigit())
+                    .lineLimit(1)
             }
         }
     }
@@ -284,8 +313,8 @@ private struct ResetText: View {
 
     var body: some View {
         if let resetsAt = window.resetsAt, resetsAt > date {
-            Text("Resets in \(Text(resetsAt, style: .relative))")
-                .font(.caption2)
+            Text("Resets in \(ResetCountdown.text(resetsAt: resetsAt, date: date))")
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else if window.isMetered, window.resetsAt == nil, window.used == 0 {
@@ -293,6 +322,26 @@ private struct ResetText: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Time left until a reset: a ticking "2:13:05" within a day, so the widget needs no reloads for
+/// the clock; "3d 1h" further out.
+struct ResetCountdown: View {
+    var resetsAt: Date
+    var date: Date
+
+    var body: some View {
+        Self.text(resetsAt: resetsAt, date: date)
+    }
+
+    static func text(resetsAt: Date, date: Date) -> Text {
+        guard resetsAt > date else { return Text("now") }
+        if resetsAt.timeIntervalSince(date) < 86_400 {
+            return Text(timerInterval: date...resetsAt, countsDown: true)
+        }
+        let words = RelativeTime.resets(resetsAt, now: date) ?? ""
+        return Text(words.replacingOccurrences(of: "resets in ", with: ""))
     }
 }
 

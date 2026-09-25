@@ -14,10 +14,15 @@ A draft for App Store Connect. Provider names appear only in the description, as
 | Secondary category | Developer Tools |
 | Price | Free |
 | Age rating | 4+ (no restricted content; links open in Safari) |
-| Support URL | https://github.com/felipedrf74/headroom/issues |
-| Marketing URL | https://github.com/felipedrf74/headroom |
-| Privacy policy URL | https://github.com/felipedrf74/headroom/blob/main/PRIVACY.md |
+| Support URL | https://github.com/felipedrf74/tokenroom/issues |
+| Marketing URL | https://github.com/felipedrf74/tokenroom |
+| Privacy policy URL | https://github.com/felipedrf74/tokenroom/blob/main/PRIVACY.md |
 | Copyright | 2026 Felipe Dominguez |
+| Availability | Every country and region except mainland China |
+| Content rights | Yes: shows third-party content (provider names, model and feed titles) it has the right to use |
+| EU trader status (DSA) | Non-trader |
+| Tracking | None |
+| Release | Manual, after approval |
 
 ## App privacy
 
@@ -27,29 +32,30 @@ Export compliance: `ITSAppUsesNonExemptEncryption = NO` (only Apple's HTTPS and 
 
 ## Promotional text (170)
 
-See how much of your AI plans you've used and when each limit resets, from your Mac, your API keys, or both. Widgets, Live Activity, alerts, and Apple Watch.
+See how much of your AI plans you've used, your pace, and when each limit resets, from your Mac or your API keys. Widgets, Live Activity, alerts, and Apple Watch.
 
 ## Description
 
-Tokenroom shows how much of your AI coding and chat plans you've used, and when each limit resets, on your iPhone, your Lock Screen, and your wrist.
+Tokenroom shows how much of your AI coding and chat plans you've used, whether you're on pace, and when each limit resets, on your iPhone, your Lock Screen, and your wrist.
 
 YOUR PLANS AT A GLANCE
+• Next up: your most pressing limit, with a live countdown to its reset
 • Used percent, reset times, and pace for every plan, most urgent first
-• A week of history for each window, and when you'd run out at the current pace
-• Banked resets, credits, balances, and this month's spend
+• When you'd run out at the current pace, and a week of history for each window
+• Banked resets, credits, balances, and this month's spend, with how long a balance lasts
 
 FROM YOUR MAC, OR RIGHT FROM YOUR IPHONE
 • Tokenroom for Mac reads the tools you already use (Claude, Codex, Cursor, GitHub Copilot, Grok, Antigravity, Devin, and more) and sends only the readings to your iPhone and Apple Watch through your own iCloud.
-• Add API keys on your iPhone for coding plans (Z.ai, Kimi Code, MiniMax, OpenCode Go), pay-as-you-go balances (OpenRouter, DeepSeek, Moonshot, Vercel AI Gateway), and organization spend (OpenAI, Anthropic, xAI). Keys stay in this iPhone's Keychain.
+• Add API keys on your iPhone for coding plans (GitHub Copilot, Z.ai, Kimi Code, MiniMax, OpenCode Go), pay-as-you-go balances (OpenRouter, DeepSeek, Moonshot, Vercel AI Gateway), and organization spend (OpenAI, Anthropic, xAI). Keys stay in this iPhone's Keychain.
 
 WIDGETS AND LIVE ACTIVITY
-• Home Screen and Lock Screen widgets, with a refresh button
-• Follow a session, or a nearly spent week, on the Lock Screen and in the Dynamic Island until it resets
+• Home Screen and Lock Screen widgets with ticking countdowns, and a refresh button
+• Follow a session, or a nearly spent week, on the Lock Screen and in the Dynamic Island until it resets. Start it from the app, Control Center, the Action button, or Siri.
 
 ALERTS THAT DON'T NAG
-• At 80% and 95%, when a busy window resets, and for banked resets
+• At 80% and 95%, when a busy window resets, for banked resets, and when a balance runs low
 • Once per event, however many devices notice it
-• Quiet hours, with only urgent alerts coming through
+• Quiet hours hold what can wait until morning
 
 NEWS
 • New models from the labs you follow
@@ -72,25 +78,28 @@ Tokenroom isn't affiliated with any of the providers it shows. Their names are u
 
 ## Review notes
 
-Tokenroom works without an account. To look around quickly: Settings › Sample Data turns on realistic sample readings for every screen, widget, and the Live Activity.
+Tokenroom works without an account. To look around quickly: Settings › Sample Data (or "Try sample data" on the welcome screen) turns on realistic sample readings for every screen, widget, and the Live Activity.
 
 Real readings come from two places:
 
-1. **Tokenroom for Mac** (free, open source; https://github.com/felipedrf74/headroom). It reads usage from the AI tools on the Mac and syncs the readings through the user's own iCloud private database. A short video of the Mac-to-iPhone flow: _link to add_.
-2. **API keys** the user pastes on the iPhone (for example an OpenRouter key). The app only reads usage and balances with them.
+1. **Tokenroom for Mac** (free, open source; https://github.com/felipedrf74/tokenroom). It reads usage from the AI tools on the Mac and syncs the readings through the user's own iCloud private database. A short video of the Mac-to-iPhone flow: _link to add_.
+2. **API keys** the user pastes on the iPhone (for example an OpenRouter key, or a GitHub fine-grained token with the Plan permission for Copilot). The app only reads usage and balances with them, through each provider's documented API.
 
-The Watch app reads the same iCloud records. Notifications are optional and come from the user's own devices through iCloud. There are no in-app purchases.
+The Watch app reads the same iCloud records. Notifications are optional and come from the user's own devices through iCloud. The News tab reads public feeds only. There are no in-app purchases.
 
 ## Screenshots
 
-6.9" iPhone (1320 × 2868), from sample data on the iPhone 18 Pro Max simulator, with the status bar set to 9:41:
+6.9" iPhone (1320 × 2868), from sample data on the iPhone 18 Pro Max simulator in US English, with the status bar set to 9:41:
 
-1. Usage
+1. Usage: Next up, highlights, and every plan
 2. Detail with pace and a week of history (OpenAI)
 3. Home Screen widgets
 4. Lock Screen widgets and the Live Activity
 5. News
 6. API keys
+7. Welcome
+
+Apple Watch, from sample data: Ultra (49mm, 422 × 514) and Series (46mm, 416 × 496), the plan list and a detail (Claude).
 
 Regenerate them from a debug build:
 
@@ -100,6 +109,12 @@ xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile -destinati
 
 ```bash
 xcrun simctl status_bar booted override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
+```
+
+Use US English formats so prices and dates match the listing ("$12.40", "Sep 28"); a simulator set to another region shows "US$12,40". Once per simulator, including the Watch:
+
+```bash
+xcrun simctl spawn booted defaults write -g AppleLocale en_US
 ```
 
 Then for each screen, launch with sample data and a destination, and take the screenshot:
@@ -112,4 +127,4 @@ xcrun simctl launch booted app.tokenroom.ios -sampleMode YES -onboarded YES -Tok
 xcrun simctl io booted screenshot 2-detail.png
 ```
 
-Other destinations: `-TokenroomGallery home`, `-TokenroomGallery lock`, `-TokenroomOpen tokenroom://news`, and `-TokenroomOpen tokenroom://keys`. Apple Watch screenshots need the watchOS simulator runtime.
+Other destinations: `-TokenroomGallery home`, `-TokenroomGallery lock`, `-TokenroomOpen tokenroom://news`, and `-TokenroomOpen tokenroom://keys`; `-sampleMode NO -onboarded NO` for the welcome screen. The Watch app takes `-sampleMode YES` and `-TokenroomOpen tokenroom://provider/claude` the same way.

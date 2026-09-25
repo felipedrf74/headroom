@@ -35,10 +35,11 @@ struct ProviderGlyph: View {
                         .fill()
                         .padding(size * 0.06)
                 default:
-                    // Providers without a drawn mark get their letter, tinted like the rest.
-                    Text(provider.letter)
-                        .font(.system(size: size * 0.62, weight: .bold, design: .rounded))
+                    // Providers without a drawn mark get their monogram ("GH"), tinted like the rest.
+                    Text(provider.monogram)
+                        .font(.system(size: size * (provider.monogram.count > 1 ? 0.46 : 0.62), weight: .bold, design: .rounded))
                         .minimumScaleFactor(0.5)
+                        .lineLimit(1)
                 }
             }
         }

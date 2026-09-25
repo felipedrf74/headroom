@@ -22,3 +22,6 @@ secrets/
 # Machine-specific build settings (team ID, signing mode)
 Config/Local.xcconfig
 build/
+
+# Coverage data from running debug builds directly
+*.profraw

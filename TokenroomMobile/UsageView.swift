@@ -1,9 +1,14 @@
 import SwiftUI
+import UserNotifications
 
 struct UsageView: View {
     @Bindable var store: MobileStore
+    var news: NewsStore
     @Binding var path: [String]
+    var openNews: (NewsView.NewsSection) -> Void = { _ in }
+    var openAlerts: () -> Void = {}
     @State private var showsDisconnected = false
+    @State private var notificationsOff = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -13,17 +18,58 @@ struct UsageView: View {
                         SampleBanner(store: store)
                     }
                 }
+                if let hero {
+                    Section {
+                        UsageHeroCard(reading: hero)
+                            .contentShape(Rectangle())
+                            .onTapGesture { path = [hero.id] }
+                    } header: {
+                        Text("Next up")
+                    }
+                }
+                if !highlights.isEmpty {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(highlights) { highlight in
+                                    Button(action: highlight.action) {
+                                        Label(highlight.title, systemImage: highlight.symbol)
+                                            .font(.subheadline.weight(.medium))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                    .listSectionSpacing(8)
+                }
                 if !store.readings.isEmpty {
                     Section {
                         ForEach(store.readings) { reading in
                             NavigationLink(value: reading.id) {
                                 ReadingRow(reading: reading)
                             }
+                            .swipeActions(edge: .leading) {
+                                if let window = LiveActivities.candidate(in: reading.provider) {
+                                    Button("Follow", systemImage: "timer") {
+                                        _ = try? LiveActivities.start(reading.provider, window: window)
+                                    }
+                                    .tint(.orange)
+                                }
+                            }
+                            .contextMenu {
+                                FollowButton(provider: reading.provider)
+                                Button("Details", systemImage: "info.circle") { path = [reading.id] }
+                            }
                         }
                     } header: {
-                        if let header {
-                            Text(header)
-                        }
+                        Text(header ?? "All plans")
                     }
                 }
                 if !store.disconnected.isEmpty {
@@ -36,7 +82,7 @@ struct UsageView: View {
                             Text("Not connected (\(store.disconnected.count))")
                         }
                     } footer: {
-                        Text("Sign in to these on your Mac to see them here.")
+                        Text(disconnectedFooter)
                     }
                 }
             }
@@ -54,13 +100,129 @@ struct UsageView: View {
             .refreshable {
                 await store.refresh(force: true)
             }
+            .task {
+                await checkNotifications()
+            }
         }
+    }
+
+    /// The most pressing metered window that's live: what the summary card leads with.
+    private var hero: MobileStore.Reading? {
+        store.readings.first { reading in
+            reading.provider.isLive && reading.provider.primaryWindow?.isMetered == true
+        }
+    }
+
+    private struct Highlight: Identifiable {
+        var id: String
+        var title: String
+        var symbol: String
+        var action: () -> Void
+    }
+
+    /// Banked resets, news, and alerts that need a look, as chips under the summary.
+    private var highlights: [Highlight] {
+        var items: [Highlight] = []
+        let banked = store.readings.filter { ($0.provider.banked?.available ?? 0) > 0 }
+        let bankedCount = banked.reduce(0) { $0 + ($1.provider.banked?.available ?? 0) }
+        if bankedCount > 0, let first = banked.first {
+            items.append(Highlight(id: "banked", title: bankedCount == 1 ? "1 banked reset" : "\(bankedCount) banked resets", symbol: "arrow.counterclockwise") {
+                path = [first.id]
+            })
+        }
+        let models = news.unseenModelCount
+        if models > 0 {
+            items.append(Highlight(id: "models", title: models == 1 ? "1 new model" : "\(models) new models", symbol: "sparkles") {
+                openNews(.models)
+            })
+        }
+        let updates = news.unseenAnnouncementCount
+        if updates > 0 {
+            items.append(Highlight(id: "updates", title: updates == 1 ? "1 update" : "\(updates) updates", symbol: "megaphone") {
+                openNews(.announcements)
+            })
+        }
+        if notificationsOff, !store.sampleMode {
+            items.append(Highlight(id: "alerts", title: "Turn on alerts", symbol: "bell.badge") {
+                openAlerts()
+            })
+        }
+        return items
+    }
+
+    private func checkNotifications() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        notificationsOff = status == .denied || status == .notDetermined
     }
 
     private var header: String? {
         guard !store.sampleMode, let source = store.sourceSummary else { return nil }
         guard let checked = store.lastChecked else { return "From \(source)" }
         return "From \(source) · checked \(RelativeTime.ago(checked))"
+    }
+
+    /// Mac providers wait for a sign-in there; this iPhone's key providers for their key to work.
+    private var disconnectedFooter: String {
+        let fromKeys = store.disconnected.contains { store.keyedProviders.map(\.rawValue).contains($0.id) }
+        let fromMac = store.disconnected.contains { !store.keyedProviders.map(\.rawValue).contains($0.id) }
+        switch (fromMac, fromKeys) {
+        case (true, true): return "Sign in to these on your Mac, or check their keys in Settings › API Keys."
+        case (false, true): return "Check these keys in Settings › API Keys."
+        default: return "Sign in to these on your Mac to see them here."
+        }
+    }
+}
+
+/// The most urgent window at a glance: a ring, the pace forecast, a live countdown to the
+/// reset, and Follow on Lock Screen.
+private struct UsageHeroCard: View {
+    var reading: MobileStore.Reading
+    @State private var followError: String?
+
+    private var provider: RelayProvider { reading.provider }
+
+    var body: some View {
+        let window = provider.primaryWindow
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 16) {
+                UsageRing(used: window?.used ?? 0, isStale: !provider.isLive, label: ReadingText.headline(window), lineWidth: 9)
+                    .frame(width: 84, height: 84)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        MonogramMark(provider: provider, size: 22)
+                        Text(provider.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                    if let window {
+                        Text(window.title)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let pace = reading.pace {
+                        Text(pace.caption())
+                            .font(.subheadline.weight(pace.needsAttention ? .semibold : .regular))
+                            .foregroundStyle(pace.needsAttention ? PaceStyle.color(pace.severity) : .secondary)
+                    }
+                    if let resetsAt = window?.resetsAt, resetsAt > .now {
+                        Text("Resets in \(Text(resetsAt, style: .relative))")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            FollowButton(provider: provider) { followError = $0 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            if let followError {
+                Text(followError)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -78,10 +240,20 @@ struct ReadingRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(provider.name)
                         .font(.headline)
-                    if let plan = provider.plan {
-                        Text(plan)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        if let plan = provider.plan {
+                            Text(plan)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let banked = provider.banked, banked.available > 0 {
+                            Text(banked.available == 1 ? "1 banked" : "\(banked.available) banked")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                                .foregroundStyle(.tint)
+                        }
                     }
                 }
                 Spacer(minLength: 8)
@@ -89,19 +261,34 @@ struct ReadingRow: View {
                     .font(.system(.title2, design: .rounded, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(headlineColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             if let window {
                 if window.isMetered {
                     MeterTrack(usedPercent: window.used, remaining: 100 - window.used, isStale: isStale, paceMark: reading.pace?.elapsedFraction)
                 }
-                Text(ReadingText.caption(window))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 8) {
+                    Text(ReadingText.caption(window))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    if window.isMetered, let week = reading.history[window.id], !week.isEmpty {
+                        Sparkline(history: week, tint: Color(hex: provider.tint), lineWidth: 1.2)
+                            .frame(width: 64, height: 18)
+                            .accessibilityLabel("Last 7 days")
+                    }
+                }
             }
-            if let pace = reading.pace, pace.verdict == .ahead || pace.verdict == .limitReached {
+            if let pace = reading.pace, pace.needsAttention {
                 Text(pace.caption())
                     .font(.caption.weight(.medium))
                     .foregroundStyle(PaceStyle.color(pace.severity))
+            }
+            if let window, let forecast = Forecast.text(for: window, history: reading.history[window.id]) {
+                Text(forecast)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if let others = otherWindows {
                 Text(others)

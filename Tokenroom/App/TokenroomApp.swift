@@ -8,8 +8,8 @@ struct TokenroomApp: App {
         // Status item is created in AppDelegate. This scene only exists so
         // Settings can be opened from the popover.
         Settings {
-            SettingsView(store: appDelegate.store)
-                .frame(width: 480)
+            SettingsView(store: appDelegate.store, request: appDelegate.settingsTab)
+                .frame(width: 600)
         }
         .windowResizability(.contentSize)
     }

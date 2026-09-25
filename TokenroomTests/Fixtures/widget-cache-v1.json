@@ -1,0 +1,74 @@
+{
+  "isSample": false,
+  "items": [
+    {
+      "history": {
+        "weekly": {
+          "start": 1789736400,
+          "used": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 60, 61, 62, 63, 64]
+        }
+      },
+      "provider": {
+        "checkedAt": 1790337480,
+        "fetchedAt": 1790337000,
+        "id": "claude",
+        "monogram": "C",
+        "name": "Claude",
+        "plan": "Max",
+        "primaryWindowID": "weekly",
+        "shortName": "Claude",
+        "state": "live",
+        "tint": "#D97757",
+        "windows": [
+          {
+            "id": "weekly",
+            "kind": "weekly",
+            "periodSec": 604800,
+            "resetsAt": 1790528400,
+            "title": "Weekly",
+            "used": 64
+          },
+          {
+            "id": "session",
+            "kind": "session",
+            "periodSec": 18000,
+            "resetsAt": 1790348400,
+            "title": "Session",
+            "used": 18
+          }
+        ]
+      },
+      "source": "Mac"
+    },
+    {
+      "history": {},
+      "provider": {
+        "checkedAt": 1790337300,
+        "fetchedAt": 1790337300,
+        "id": "deepseek",
+        "monogram": "DS",
+        "name": "DeepSeek",
+        "primaryWindowID": "balance-usd",
+        "shortName": "DeepSeek",
+        "state": "live",
+        "tint": "#4D6BFE",
+        "windows": [
+          {
+            "amount": {
+              "remaining": 12.4,
+              "unit": "usd"
+            },
+            "id": "balance-usd",
+            "kind": "pool",
+            "metered": false,
+            "title": "Balance",
+            "used": 0
+          }
+        ]
+      },
+      "source": "This iPhone"
+    }
+  ],
+  "savedAt": 1790337600,
+  "v": 1
+}

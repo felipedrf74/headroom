@@ -86,6 +86,8 @@ struct RelayProvider: Codable, Equatable, Sendable, Identifiable {
     var windows: [RelayWindow]
     var banked: BankedResets? = nil
     var extra: ExtraUsage? = nil
+    /// `subscription`, `apiBalance`, or `orgSpend`, for grouping; newer kinds read as unknown.
+    var category: String? = nil
 
     var primaryWindow: RelayWindow? {
         windows.first { $0.id == primaryWindowID } ?? windows.first
@@ -106,4 +108,13 @@ struct RelayWindow: Codable, Equatable, Sendable, Identifiable {
     var amount: QuotaAmount? = nil
     /// False for amount-only windows (a balance with no limit).
     var metered: Bool? = nil
+    /// Pace the collector worked out from its own frequent readings; readers with only the
+    /// hourly week prefer it.
+    var pace: RelayPace? = nil
+}
+
+/// What a collector measured about a window's pace.
+struct RelayPace: Codable, Equatable, Sendable {
+    /// When usage would reach 100% at the recent rate; nil when it wouldn't before the reset.
+    var runsOutAt: Date?
 }

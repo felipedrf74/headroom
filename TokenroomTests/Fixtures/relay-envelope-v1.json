@@ -1,0 +1,75 @@
+{
+  "appVersion": "2.0.0",
+  "checkedAt": 1790337600,
+  "minReader": 1,
+  "producer": "mac",
+  "providers": [
+    {
+      "banked": {
+        "available": 2,
+        "expiries": [1790769600, 1791374400]
+      },
+      "checkedAt": 1790337480,
+      "extra": {
+        "amount": {
+          "remaining": 18.4,
+          "unit": "usd"
+        },
+        "isEnabled": true,
+        "title": "Credits"
+      },
+      "fetchedAt": 1790337480,
+      "id": "openai",
+      "monogram": "O",
+      "name": "OpenAI",
+      "plan": "Pro",
+      "primaryWindowID": "weekly",
+      "shortName": "GPT",
+      "state": "live",
+      "tint": "#10A37F",
+      "windows": [
+        {
+          "id": "weekly",
+          "kind": "weekly",
+          "periodSec": 604800,
+          "resetsAt": 1790604000,
+          "title": "Weekly",
+          "used": 78
+        },
+        {
+          "id": "session",
+          "kind": "session",
+          "periodSec": 18000,
+          "resetsAt": 1790351400,
+          "title": "Session",
+          "used": 22
+        }
+      ]
+    },
+    {
+      "checkedAt": 1790337300,
+      "fetchedAt": 1790337300,
+      "id": "deepseek",
+      "monogram": "DS",
+      "name": "DeepSeek",
+      "primaryWindowID": "balance-usd",
+      "shortName": "DeepSeek",
+      "state": "live",
+      "tint": "#4D6BFE",
+      "windows": [
+        {
+          "amount": {
+            "remaining": 12.4,
+            "unit": "usd"
+          },
+          "id": "balance-usd",
+          "kind": "pool",
+          "metered": false,
+          "title": "Balance",
+          "used": 0
+        }
+      ]
+    }
+  ],
+  "v": 1
+}

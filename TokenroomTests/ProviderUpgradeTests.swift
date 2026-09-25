@@ -59,10 +59,11 @@ final class ProviderUpgradeTests: XCTestCase {
 
     // MARK: Grok
 
+    /// `GET /v1/settings`: only the plan's display name is read, trimmed.
     func testGrokPlanLabelFromSettings() {
-        let settings = Data(#"{"subscription_tier_display":" SuperGrok Heavy ","default_model":"grok-4.7","announcements":[]}"#.utf8)
-        XCTAssertEqual(GrokParser.planLabel(fromSettings: settings), "SuperGrok Heavy")
+        XCTAssertEqual(GrokParser.planLabel(fromSettings: fixture("grok-settings")), "SuperGrok Heavy")
         XCTAssertNil(GrokParser.planLabel(fromSettings: Data(#"{"subscription_tier_display":""}"#.utf8)))
+        XCTAssertNil(GrokParser.planLabel(fromSettings: Data(#"{"subscription_tier":"SUBSCRIPTION_TIER_FREE"}"#.utf8)), "The internal tier name is never shown")
         XCTAssertNil(GrokParser.planLabel(fromSettings: Data("not json".utf8)))
     }
 
@@ -73,7 +74,7 @@ final class ProviderUpgradeTests: XCTestCase {
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
         let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         XCTAssertFalse(files.isEmpty)
-        let patterns = ["@", "sk-", "eyJ", "ghp_", "gho_", "ghu_"]
+        let patterns = ["@", "sk-", "eyJ", "ghp_", "gho_", "ghu_", "github_pat_"]
         for file in files where file.pathExtension == "json" {
             let text = try String(contentsOf: file, encoding: .utf8)
             for pattern in patterns {

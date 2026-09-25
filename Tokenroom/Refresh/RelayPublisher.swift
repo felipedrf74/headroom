@@ -119,30 +119,45 @@ final class RelayPublisher {
         }
     }
 
-    /// The iPhone's alert preferences, checked at most every half hour; defaults until it has set any.
-    func alertPreferences(now: Date = .now) async -> AlertPreferences {
+    /// The newer of this Mac's alert preferences and the copy in iCloud, which either device may
+    /// have changed. iCloud is checked at most every half hour.
+    func alertPreferences(local: AlertPreferences, now: Date = .now) async -> AlertPreferences {
         if let cached = preferencesCache, now.timeIntervalSince(cached.readAt) < 30 * 60 {
-            return cached.preferences
+            return AlertPreferences.newest(cached.preferences, local)
         }
-        guard let relay, isEnabled, let preferences = try? await relay.alertPreferences() else {
-            return preferencesCache?.preferences ?? AlertPreferences()
+        guard let relay, isEnabled, let remote = try? await relay.alertPreferences() else {
+            return AlertPreferences.newest(preferencesCache?.preferences, local)
         }
-        preferencesCache = (preferences, now)
-        return preferences
+        preferencesCache = (remote, now)
+        return AlertPreferences.newest(remote, local)
     }
 
-    /// Sends new alerts to the iPhone. Outside quiet hours, or urgent.
-    func sendAlerts(_ alerts: [UsageAlert], preferences: AlertPreferences, now: Date = .now) async {
+    /// Shares preferences changed on this Mac.
+    func publishAlertPreferences(_ preferences: AlertPreferences, now: Date = .now) async {
+        preferencesCache = (preferences, now)
         guard let relay, isEnabled else { return }
-        for alert in alerts where preferences.shouldSend(alert, at: now) {
+        do {
+            try await relay.publishAlertPreferences(preferences)
+        } catch {
+            handle(error, now: now)
+        }
+    }
+
+    /// Sends alerts to the iPhone; returns the IDs iCloud saved. The rest stay queued.
+    func sendAlerts(_ alerts: [UsageAlert], now: Date = .now) async -> [String] {
+        guard let relay, isEnabled else { return [] }
+        if let retryAt, retryAt > now { return [] }
+        var saved: [String] = []
+        for alert in alerts {
             do {
                 try await relay.saveAlert(alert)
+                saved.append(alert.id)
                 logger.notice("relay alert sent \(alert.kind.rawValue, privacy: .public) \(alert.level, privacy: .public)")
             } catch {
-                handle(error, now: now)
-                return
+                if handle(error, now: now).stopsBatch { break }
             }
         }
+        return saved
     }
 
     /// Creates an alert event the iPhone shows as a notification. Used by "Send Test Alert".
@@ -162,31 +177,26 @@ final class RelayPublisher {
         }
     }
 
-    private func handle(_ error: Error, now: Date) {
+    @discardableResult
+    private func handle(_ error: Error, now: Date) -> RelayErrorPolicy.Outcome {
         logger.error("relay failed: \(String(describing: error), privacy: .public)")
-        guard let error = error as? CKError else {
-            state = .failed("Couldn't reach iCloud.")
-            return
-        }
-        switch error.code {
-        case .notAuthenticated:
+        let outcome = RelayErrorPolicy.outcome(for: error, defaultRetry: Self.minimumInterval)
+        switch outcome {
+        case .noAccount:
             state = .noAccount
-        case .userDeletedZone:
-            state = .paused("Tokenroom's iCloud data was deleted. Turn sync off and on to start again.")
-        case .quotaExceeded:
-            state = .paused("Couldn't save: iCloud storage is full.")
-        case .requestRateLimited, .zoneBusy, .serviceUnavailable:
-            retryAt = now.addingTimeInterval(error.retryAfterSeconds ?? Self.minimumInterval)
-            state = .failed("Couldn't reach iCloud. Trying again soon.")
-        case .badContainer:
-            // A newly created container takes a while to reach every CloudKit server.
-            retryAt = now.addingTimeInterval(max(error.retryAfterSeconds ?? 0, Self.minimumInterval))
-            state = .failed("Couldn't reach Tokenroom's iCloud container yet. Trying again soon.")
-        case .missingEntitlement, .permissionFailure:
+        case .paused(let message):
+            state = .paused(message)
+        case .retry(let after, let message):
+            retryAt = now.addingTimeInterval(after)
+            state = .failed(message)
+        case .unavailable:
             state = .unavailable
-        default:
-            state = .failed("Couldn't reach iCloud.")
+        case .cancelled:
+            break
+        case .failed(let message):
+            state = .failed(message)
         }
+        return outcome
     }
 
     var statusText: String {

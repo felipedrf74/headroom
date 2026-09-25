@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import WatchConnectivity
 import WatchKit
 import WidgetKit
@@ -10,19 +11,39 @@ import WidgetKit
 @MainActor
 final class WatchStore {
     static let backgroundTaskID = "app.tokenroom.watch.refresh"
+    /// The Smart Stack widget's kind, in TokenroomWatchWidgets.
+    static let resetSoonKind = "watch.resetSoon"
     /// How often to ask watchOS for a background refresh; it decides when.
     static let backgroundInterval: TimeInterval = 15 * 60
 
+    enum Problem: Equatable {
+        case noAccount
+        case unreachable
+    }
+
     private(set) var cache: ReadingCache?
     private(set) var isRefreshing = false
-    /// iCloud didn't answer and there's nothing saved to show.
-    private(set) var failed = false
+    /// Why there's nothing to show, when there isn't.
+    private(set) var problem: Problem?
+    /// Opened from a complication or the Smart Stack: the provider to show.
+    var openedProvider: String?
     private var lastRefresh: Date?
     private let cacheURL = ReadingCache.defaultURL
     private let link = PhoneLink()
 
     init() {
         cache = cacheURL.flatMap(ReadingCache.load)
+        #if DEBUG
+        // Screenshots and simulator checks: `-sampleMode YES` shows sample readings.
+        if UserDefaults.standard.bool(forKey: "sampleMode") {
+            cache = SampleData.cache()
+        }
+        // `-TokenroomOpen tokenroom://provider/claude` opens a provider, for screenshots.
+        if let link = UserDefaults.standard.string(forKey: "TokenroomOpen").flatMap(URL.init(string:)),
+           case .provider(let id) = DeepLink(link) {
+            openedProvider = id
+        }
+        #endif
         link.onCache = { [weak self] cache in
             self?.apply(cache)
         }
@@ -43,11 +64,20 @@ final class WatchStore {
         isRefreshing = true
         defer { isRefreshing = false }
         lastRefresh = now
-        if let fresh = await RelayReadings.fetch(now: now) {
-            failed = false
+        switch await RelayReadings.read(now: now) {
+        case .readings(let fresh):
+            problem = nil
             apply(fresh)
-        } else {
-            failed = cache == nil
+        case .noAccount:
+            problem = cache == nil ? .noAccount : nil
+        case .failed:
+            problem = cache == nil ? .unreachable : nil
+        case .unavailable:
+            // A build without iCloud (no team): sample readings, clearly marked.
+            if cache == nil {
+                cache = SampleData.cache(now: now)
+            }
+            problem = nil
         }
     }
 
@@ -62,6 +92,8 @@ final class WatchStore {
         }
         if changed {
             WidgetCenter.shared.reloadAllTimelines()
+            // The Smart Stack widget picks its moments from the readings; let it look again.
+            WidgetCenter.shared.invalidateRelevance(ofKind: WatchStore.resetSoonKind)
         }
     }
 
@@ -94,12 +126,19 @@ final class PhoneLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     private func deliver(_ context: [String: Any]) {
-        guard let data = context[PhoneLink.readingsKey] as? Data,
-              let cache = try? RelayEnvelope.decoder.decode(ReadingCache.self, from: data),
-              let handler = onCache
-        else { return }
+        guard let data = context[PhoneLink.readingsKey] as? Data else { return }
+        let cache: ReadingCache
+        do {
+            cache = try RelayEnvelope.decoder.decode(ReadingCache.self, from: data)
+        } catch {
+            Self.logger.error("readings from iPhone unreadable: \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard let handler = onCache else { return }
         Task { @MainActor in handler(cache) }
     }
+
+    private static let logger = Logger(subsystem: "app.tokenroom.watch", category: "phone-link")
 
     static let readingsKey = "readings"
 }

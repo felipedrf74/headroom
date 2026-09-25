@@ -66,6 +66,8 @@ struct APIKeyClient: ProviderClient {
             return try KimiCodeParser.snapshot(from: data)
         case .minimax:
             return try await minimaxSnapshot(key: key, region: region)
+        case .copilot:
+            return try await copilotSnapshot(key: key, planName: region)
         case .opencodeGo:
             let (data, response) = try await TokenroomHTTP.data(for: TokenroomHTTP.request(CodingPlanEndpoint.opencodeGoUsage, token: key))
             if let error = OpenCodeGoParser.error(status: response.statusCode, body: data) {
@@ -76,6 +78,25 @@ struct APIKeyClient: ProviderClient {
         default:
             throw ProviderError.parse
         }
+    }
+
+    /// What "Test & Save" learns about a key besides its reading.
+    struct KeyCheck: Sendable {
+        var snapshot: QuotaSnapshot
+        /// Shown next to the key, e.g. an xAI key that can also change billing or keys.
+        var warning: String?
+    }
+
+    /// `snapshot(for:key:region:)`, plus what's worth warning about before the key is saved.
+    static func check(for provider: Provider, key: String, region: String?) async throws -> KeyCheck {
+        let snapshot = try await snapshot(for: provider, key: key, region: region)
+        var warning: String?
+        if provider == .xaiOrg,
+           let validation = try? await TokenroomHTTP.get(URL(string: "https://management-api.x.ai/auth/management-keys/validation")!, token: key, provider: provider),
+           XAIBillingParser.canWrite(fromValidation: validation) {
+            warning = "This key can also change your team's keys or billing. Tokenroom only reads with it, but a key limited to reading billing is safer."
+        }
+        return KeyCheck(snapshot: snapshot, warning: warning)
     }
 
     /// The Token Plan endpoint first, then the older Coding Plan one for accounts still on it.

@@ -81,6 +81,20 @@ extension Provider {
     var cliExecutable: String? { login?.cliExecutable }
     var loginArguments: [String] { login?.loginArguments ?? [] }
     var installToolName: String { login?.installToolName ?? displayName }
+
+    /// The app or CLI whose usage endpoint Tokenroom reads, as people call it.
+    var toolName: String {
+        switch self {
+        case .grok: "Grok Build"
+        case .grokBot, .cursor: "Cursor"
+        case .claude: "Claude Code"
+        case .openai: "Codex"
+        case .copilot: "GitHub Copilot"
+        case .antigravity: "Antigravity"
+        case .devin: "Devin"
+        default: displayName
+        }
+    }
     var installURL: URL { login?.installURL ?? key?.createURL ?? TokenroomIdentity.repositoryURL }
     var appBundleIdentifiers: [String] { login?.appBundleIdentifiers ?? [] }
     var appNames: [String] { login?.appNames ?? [] }

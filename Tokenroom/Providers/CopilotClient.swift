@@ -6,18 +6,43 @@ import Synchronization
 struct CopilotClient: ProviderClient {
     let provider = Provider.copilot
     static let userURL = URL(string: "https://api.github.com/copilot_internal/user")!
+    /// A fine-grained token pasted in Settings › API Keys, for GitHub's documented billing API.
+    var keys = CredentialReaders.apiKeys
 
+    /// The GitHub login Copilot's tools keep, else a pasted fine-grained token. When the login
+    /// is missing or rejected and a token is there, the token answers.
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
-        guard let token = await BlockingIO.run({ CopilotCredentials.token() }) else {
-            return .failure(.signedOut(provider.signInHint))
+        let login = await BlockingIO.run({ CopilotCredentials.token() })
+        var failure = ProviderError.signedOut(provider.signInHint)
+        if let token = login {
+            do {
+                let data = try await TokenroomHTTP.get(Self.userURL, token: nil, headers: ["Authorization": "token \(token)"], provider: provider)
+                return .success(try CopilotParser.snapshot(from: data))
+            } catch let error as ProviderError {
+                if case .expired = error {
+                    CopilotCredentials.invalidate()
+                }
+                failure = error
+            } catch {
+                failure = .unreachable
+            }
+            // Only a missing or refused login falls back; an outage or rate limit stays one.
+            switch failure {
+            case .expired, .signedOut, .notEntitled, .parse:
+                break
+            default:
+                return .failure(failure)
+            }
+        }
+        let keys = self.keys
+        guard let pasted = await BlockingIO.run({ keys.key(for: .copilot).map { ($0, keys.metadata(for: .copilot)?.region) } }) else {
+            return .failure(failure)
         }
         do {
-            let data = try await TokenroomHTTP.get(Self.userURL, token: nil, headers: ["Authorization": "token \(token)"], provider: provider)
-            return .success(try CopilotParser.snapshot(from: data))
+            var snapshot = try await APIKeyClient.copilotSnapshot(key: pasted.0, planName: pasted.1)
+            snapshot.source = "copilot-token"
+            return .success(snapshot)
         } catch let error as ProviderError {
-            if case .expired = error {
-                CopilotCredentials.invalidate()
-            }
             return .failure(error)
         } catch {
             return .failure(.unreachable)
@@ -37,9 +62,12 @@ enum CopilotParser {
 
         var windows: [QuotaWindow] = []
         if let snapshots = JSONFlex.dictionary(root["quota_snapshots"]) {
+            // Since June 2026 GitHub bills in AI credits; the same bucket then counts credits.
+            let credits = (root["token_based_billing"] as? Bool) == true
             for (id, title, unit) in buckets {
+                let named = id == "premium_interactions" && credits ? (title: "AI credits", unit: "credits") : (title: title, unit: unit)
                 guard let bucket = JSONFlex.dictionary(snapshots[id]),
-                      let window = window(bucket, id: id, title: title, unit: unit, resetsAt: resetsAt, startsAt: startsAt)
+                      let window = window(bucket, id: id, title: named.title, unit: named.unit, resetsAt: resetsAt, startsAt: startsAt)
                 else { continue }
                 windows.append(window)
             }
@@ -62,7 +90,7 @@ enum CopilotParser {
         return try .headlined(by: windows, provider: .copilot, fetchedAt: fetchedAt, planLabel: planLabel(root))
     }
 
-    /// Premium requests lead when the plan has them.
+    /// Premium requests (AI credits on token billing) lead when the plan has them.
     static let buckets: [(id: String, title: String, unit: String)] = [
         ("premium_interactions", "Premium requests", "requests"),
         ("chat", "Chat", "messages"),

@@ -17,7 +17,18 @@ struct OnboardingView: View {
                         Text("See how much of your AI plans you've used, and when they reset.")
                             .foregroundStyle(.secondary)
                     }
+                    .padding(.bottom, 4)
+
+                    LazyVGrid(columns: [GridItem(.flexible(), alignment: .top), GridItem(.flexible(), alignment: .top)], alignment: .leading, spacing: 14) {
+                        Feature(symbol: "chart.line.uptrend.xyaxis", text: "Pace, and when you'd run out")
+                        Feature(symbol: "bell.badge", text: "Alerts at 80%, 95%, and resets")
+                        Feature(symbol: "rectangle.stack", text: "Widgets, Live Activity, Watch")
+                        Feature(symbol: "newspaper", text: "New models and updates")
+                    }
                     .padding(.bottom, 8)
+
+                    Text("Get started")
+                        .font(.title3.weight(.semibold))
 
                     NavigationLink {
                         ConnectMacView(store: store)
@@ -50,6 +61,24 @@ struct OnboardingView: View {
                 }
             }
         }
+    }
+}
+
+private struct Feature: View {
+    var symbol: String
+    var text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 22)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

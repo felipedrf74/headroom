@@ -2,9 +2,10 @@ import SwiftUI
 
 struct WatchRootView: View {
     var store: WatchStore
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if store.items.isEmpty {
                     WatchEmptyView(store: store)
@@ -16,7 +17,7 @@ struct WatchRootView: View {
                             }
                         }
                         if store.cache?.isSample == true {
-                            Text("Sample data from your iPhone")
+                            Text("Sample data")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         } else if let checked = store.cache?.checkedAt {
@@ -34,6 +35,15 @@ struct WatchRootView: View {
                 }
             }
         }
+        // Opened from a complication or the Smart Stack; if the readings aren't in yet, once they are.
+        .onChange(of: store.openedProvider, initial: true) { _, _ in openRequestedProvider() }
+        .onChange(of: store.items.map(\.id)) { _, _ in openRequestedProvider() }
+    }
+
+    private func openRequestedProvider() {
+        guard let id = store.openedProvider, store.item(id: id) != nil else { return }
+        path = [id]
+        store.openedProvider = nil
     }
 }
 
@@ -46,17 +56,42 @@ private struct WatchEmptyView: View {
         } else {
             ScrollView {
                 VStack(spacing: 8) {
-                    Image(systemName: store.failed ? "icloud.slash" : "gauge.with.dots.needle.50percent")
+                    Image(systemName: symbol)
                         .font(.title2)
                         .foregroundStyle(.tint)
-                    Text(store.failed ? "Couldn't reach iCloud" : "No readings yet")
+                    Text(title)
                         .font(.headline)
-                    Text("Open Tokenroom on your iPhone or Mac. The Watch shows what they send through your iCloud.")
+                        .multilineTextAlignment(.center)
+                    Text(message)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
             }
+        }
+    }
+
+    private var symbol: String {
+        switch store.problem {
+        case .noAccount: "person.crop.circle.badge.questionmark"
+        case .unreachable: "icloud.slash"
+        case nil: "gauge.with.dots.needle.50percent"
+        }
+    }
+
+    private var title: String {
+        switch store.problem {
+        case .noAccount: "Sign in to iCloud"
+        case .unreachable: "Couldn't reach iCloud"
+        case nil: "No readings yet"
+        }
+    }
+
+    private var message: String {
+        switch store.problem {
+        case .noAccount: "Use the same Apple Account on this Watch as on your iPhone and Mac."
+        case .unreachable: "The Watch shows what your iPhone and Mac send through iCloud. It tries again soon."
+        case nil: "Open Tokenroom on your iPhone or Mac. The Watch shows what they send through your iCloud."
         }
     }
 }
@@ -79,10 +114,13 @@ private struct WatchRow: View {
                     Text(provider.shortName)
                         .font(.headline)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Spacer(minLength: 2)
                     Text(ReadingText.headline(window))
                         .font(.headline.monospacedDigit())
                         .foregroundStyle(headlineColor(window, isLive: provider.isLive))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
                 if let window {
                     Text(ReadingText.reset(window) ?? window.title)
@@ -93,6 +131,7 @@ private struct WatchRow: View {
             }
         }
         .opacity(provider.isLive ? 1 : 0.7)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -108,30 +147,17 @@ struct WatchDetailView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(provider.windows) { window in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(window.title)
-                            .font(.caption)
-                        Spacer()
-                        Text(ReadingText.headline(window))
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(headlineColor(window, isLive: provider.isLive))
-                    }
-                    if window.isMetered {
-                        MeterTrack(usedPercent: window.used, remaining: 100 - window.used, isStale: !provider.isLive, height: 6)
-                    }
-                    if let resetsAt = window.resetsAt, resetsAt > .now {
-                        Text("Resets in \(Text(resetsAt, style: .relative))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let pace = UsageRanking.pace(for: window, isStale: !provider.isLive, history: item.history[window.id]),
-                       pace.verdict == .ahead || pace.verdict == .limitReached {
-                        Text(pace.caption())
-                            .font(.caption2)
-                            .foregroundStyle(TokenroomTokens.tight)
-                    }
-                }
+                let pace = window.isMetered ? UsageRanking.pace(for: window, isStale: !provider.isLive, history: item.history[window.id]) : nil
+                WindowRow(
+                    title: window.title,
+                    headline: ReadingText.headline(window),
+                    usedPercent: window.isMetered ? window.used : nil,
+                    isStale: !provider.isLive,
+                    paceMark: pace?.elapsedFraction,
+                    caption: detail(window, pace: pace),
+                    titleFont: .caption,
+                    captionFont: .caption2
+                )
                 .padding(.vertical, 2)
             }
             if let banked = provider.banked, banked.available > 0 {
@@ -148,23 +174,17 @@ struct WatchDetailView: View {
         }
         .navigationTitle(provider.shortName)
     }
-}
 
-/// A ring for one window: used percent in the usage gradient, the monogram in the middle.
-struct UsageRing: View {
-    var used: Double
-    var isStale: Bool
-    var label: String
-
-    var body: some View {
-        Gauge(value: min(max(used, 0), 100), in: 0...100) {
-            Text(label)
-        } currentValueLabel: {
-            Text(label)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+    /// "resets in 2h 10m · Ahead of pace".
+    private func detail(_ window: RelayWindow, pace: Pace?) -> String? {
+        var parts: [String] = []
+        if let reset = ReadingText.reset(window) {
+            parts.append(reset)
         }
-        .gaugeStyle(.accessoryCircularCapacity)
-        .tint(isStale ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(Gradient(colors: [TokenroomTokens.usageHealthy, TokenroomTokens.usageWatch, TokenroomTokens.usageTight, TokenroomTokens.usageCritical])))
+        if let pace, pace.needsAttention {
+            parts.append(pace.caption())
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

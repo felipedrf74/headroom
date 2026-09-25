@@ -19,13 +19,27 @@ struct NewsCache: Codable, Equatable, Sendable {
     /// Conditional GET validators per URL, so unchanged feeds cost a 304.
     var validators: [String: Validator] = [:]
 
-    /// Announcements from the given feeds, newest first.
+    /// Announcements from the given feeds, newest first. An entry two feeds share (the same
+    /// link, title, or version) shows once: the newer copy, dated when the first one appeared, so
+    /// it isn't new again when the second feed catches up.
     func announcements(from sources: [FeedSource], limit: Int = 80) -> [FeedItem] {
         let ids = Set(sources.map(\.id))
-        return items.filter { ids.contains($0.key) }.values.flatMap { $0 }
-            .sorted { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
-            .prefix(limit)
-            .map { $0 }
+        let newestFirst: (FeedItem, FeedItem) -> Bool = { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        var kept: [FeedItem] = []
+        var positions: [String: Int] = [:]
+        for item in items.filter({ ids.contains($0.key) }).values.flatMap({ $0 }).sorted(by: newestFirst) {
+            let keys = [item.link?.absoluteString, item.duplicateKey].compactMap { $0 }
+            if let position = keys.lazy.compactMap({ positions[$0] }).first {
+                if let published = item.published, published < (kept[position].published ?? .distantFuture) {
+                    kept[position].published = published
+                }
+                keys.forEach { positions[$0] = position }
+                continue
+            }
+            keys.forEach { positions[$0] = kept.count }
+            kept.append(item)
+        }
+        return Array(kept.sorted(by: newestFirst).prefix(limit))
     }
 
     static func load(from directory: URL?) -> NewsCache {
@@ -80,7 +94,7 @@ enum NewsFetcher {
             let results = await withTaskGroup(of: (FeedSource, Data?, NewsCache.Validator?, Bool).self) { group in
                 for source in sources {
                     group.addTask {
-                        let (data, validator, notModified) = await get(source.url, validator: previous[source.url.absoluteString])
+                        let (data, validator, notModified) = await get(source.url, validator: previous[source.url.absoluteString], sizeLimit: source.sizeLimit)
                         return (source, data, validator, notModified)
                     }
                 }
@@ -112,7 +126,7 @@ enum NewsFetcher {
     }
 
     /// A conditional GET. Nil data with `notModified` means the cached copy is current.
-    static func get(_ url: URL, validator: NewsCache.Validator?) async -> (Data?, NewsCache.Validator?, Bool) {
+    static func get(_ url: URL, validator: NewsCache.Validator?, sizeLimit: Int = FeedParser.sizeLimit) async -> (Data?, NewsCache.Validator?, Bool) {
         var request = URLRequest(url: url)
         request.setValue("application/rss+xml, application/atom+xml, application/json, */*;q=0.5", forHTTPHeaderField: "Accept")
         if let etag = validator?.etag {
@@ -125,7 +139,7 @@ enum NewsFetcher {
         if response.statusCode == 304 {
             return (nil, validator, true)
         }
-        guard (200..<300).contains(response.statusCode), data.count <= FeedParser.sizeLimit else { return (nil, nil, false) }
+        guard (200..<300).contains(response.statusCode), data.count <= sizeLimit else { return (nil, nil, false) }
         let fresh = NewsCache.Validator(
             etag: response.value(forHTTPHeaderField: "ETag"),
             lastModified: response.value(forHTTPHeaderField: "Last-Modified")

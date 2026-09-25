@@ -72,6 +72,12 @@ enum LiveActivities {
     static func update(with providers: [RelayProvider], now: Date = .now) async {
         for activity in Activity<SessionActivityAttributes>.activities where activity.activityState == .active {
             let old = activity.content.state
+            if old.resetsAt <= now {
+                // Reset, even if no newer reading has come in yet.
+                let final = SessionActivityAttributes.ContentState(used: 0, resetsAt: old.resetsAt, isStale: false)
+                await activity.end(ActivityContent(state: final, staleDate: nil), dismissalPolicy: .after(now.addingTimeInterval(lingering)))
+                continue
+            }
             let provider = providers.first { $0.id == activity.attributes.providerID }
             let window = provider?.windows.first { $0.id == activity.attributes.windowID }
             guard let provider, let window, let resetsAt = window.resetsAt, AlertRules.isSameInstance(resetsAt, old.resetsAt) else {

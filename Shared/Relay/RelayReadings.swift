@@ -3,14 +3,31 @@ import Foundation
 /// Readings straight from iCloud, for devices that read no provider themselves: the Watch and
 /// its complications. Every collector's record counts, the iPhone's included.
 enum RelayReadings {
+    enum Outcome: Sendable {
+        case readings(ReadingCache)
+        /// No iCloud account on this device.
+        case noAccount
+        /// This build has no iCloud container (not signed for it).
+        case unavailable
+        /// iCloud didn't answer.
+        case failed
+    }
+
+    static func read(now: Date = .now) async -> Outcome {
+        guard let container = RelayAvailability.containerIdentifier else { return .unavailable }
+        let relay = CloudRelay(containerIdentifier: container)
+        guard let status = try? await relay.accountStatus() else { return .failed }
+        guard status == .available else { return .noAccount }
+        guard let contents = try? await relay.contents() else { return .failed }
+        return .readings(cache(from: contents, now: now))
+    }
+
     /// Nil when this build has no iCloud container, there's no account, or iCloud didn't answer.
     static func fetch(now: Date = .now) async -> ReadingCache? {
-        guard let container = RelayAvailability.containerIdentifier else { return nil }
-        let relay = CloudRelay(containerIdentifier: container)
-        guard (try? await relay.accountStatus()) == .available,
-              let contents = try? await relay.contents()
-        else { return nil }
-        return cache(from: contents, now: now)
+        if case .readings(let cache) = await read(now: now) {
+            return cache
+        }
+        return nil
     }
 
     static func cache(from contents: CloudRelay.Contents, now: Date = .now) -> ReadingCache {

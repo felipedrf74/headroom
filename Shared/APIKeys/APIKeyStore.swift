@@ -14,21 +14,54 @@ struct APIKeyStore: Sendable {
     struct Metadata: Codable, Equatable, Sendable {
         var last4: String
         var addedAt: Date
-        /// Moonshot's "Global" or "China" platform.
+        /// Moonshot's "Global" or "China" platform, or the Copilot plan picked with the token.
         var region: String?
+        /// Set when the key's test found something to warn about, e.g. write access.
+        var warning: String? = nil
     }
 
     /// Keychain access group shared with the widget extension on iPhone; nil on the Mac.
     var accessGroup: String? = nil
     /// Tests use their own prefix so they never touch real keys.
     var servicePrefix = "app.tokenroom.key."
+    #if os(macOS)
+    /// Team-signed Mac builds keep keys in the data-protection keychain, tied to the team and
+    /// free of prompts. Ad-hoc builds can't, and use the login keychain; keys saved there move
+    /// over the first time a team build reads them.
+    var usesDataProtection = KeychainAvailability.dataProtection
+    #endif
 
     func service(for provider: Provider) -> String {
         servicePrefix + provider.rawValue
     }
 
     func key(for provider: Provider) -> String? {
-        var query = baseQuery(provider)
+        if let key = readKey(baseQuery(provider)) {
+            return key
+        }
+        #if os(macOS)
+        if usesDataProtection, let legacy = readKey(legacyQuery(provider)) {
+            migrate(provider, key: legacy)
+            return legacy
+        }
+        #endif
+        return nil
+    }
+
+    func metadata(for provider: Provider) -> Metadata? {
+        if let metadata = readMetadata(baseQuery(provider)) {
+            return metadata
+        }
+        #if os(macOS)
+        if usesDataProtection {
+            return readMetadata(legacyQuery(provider))
+        }
+        #endif
+        return nil
+    }
+
+    private func readKey(_ base: [String: Any]) -> String? {
+        var query = base
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -39,8 +72,8 @@ struct APIKeyStore: Sendable {
         return key
     }
 
-    func metadata(for provider: Provider) -> Metadata? {
-        var query = baseQuery(provider)
+    private func readMetadata(_ base: [String: Any]) -> Metadata? {
+        var query = base
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -51,15 +84,35 @@ struct APIKeyStore: Sendable {
         return try? JSONDecoder().decode(Metadata.self, from: data)
     }
 
+    #if os(macOS)
+    /// The same item in the login keychain, where ad-hoc builds and older versions saved it.
+    private func legacyQuery(_ provider: Provider) -> [String: Any] {
+        var query = baseQuery(provider)
+        query.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+        return query
+    }
+
+    /// Moves a login-keychain key into the data-protection keychain, keeping its metadata.
+    private func migrate(_ provider: Provider, key: String) {
+        let metadata = readMetadata(legacyQuery(provider))
+        do {
+            try save(key, for: provider, region: metadata?.region, warning: metadata?.warning, now: metadata?.addedAt ?? .now)
+            SecItemDelete(legacyQuery(provider) as CFDictionary)
+        } catch {
+            // Still readable where it was; try again next time.
+        }
+    }
+    #endif
+
     func hasKey(for provider: Provider) -> Bool {
         metadata(for: provider) != nil
     }
 
-    func save(_ key: String, for provider: Provider, region: String? = nil, now: Date = .now) throws {
+    func save(_ key: String, for provider: Provider, region: String? = nil, warning: String? = nil, now: Date = .now) throws {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw KeyError.empty }
-        let metadata = Metadata(last4: String(trimmed.suffix(4)), addedAt: now, region: region)
-        try? remove(for: provider)
+        let metadata = Metadata(last4: String(trimmed.suffix(4)), addedAt: now, region: region, warning: warning)
+        SecItemDelete(baseQuery(provider) as CFDictionary)
 
         var attributes = baseQuery(provider)
         attributes[kSecValueData as String] = Data(trimmed.utf8)
@@ -75,6 +128,11 @@ struct APIKeyStore: Sendable {
 
     func remove(for provider: Provider) throws {
         let status = SecItemDelete(baseQuery(provider) as CFDictionary)
+        #if os(macOS)
+        if usesDataProtection {
+            SecItemDelete(legacyQuery(provider) as CFDictionary)
+        }
+        #endif
         guard status == errSecSuccess || status == errSecItemNotFound else { throw KeyError.keychain(status) }
     }
 
@@ -88,6 +146,24 @@ struct APIKeyStore: Sendable {
         if let accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
         }
+        #if os(macOS)
+        if usesDataProtection {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
+        #endif
         return query
     }
 }
+
+#if os(macOS)
+/// Whether this Mac build can use the data-protection keychain: only builds signed with an
+/// application identifier (team or Developer ID with a profile) can.
+enum KeychainAvailability {
+    static let dataProtection: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "com.apple.application-identifier" as CFString, nil)
+        else { return false }
+        return (value as? String)?.isEmpty == false
+    }()
+}
+#endif

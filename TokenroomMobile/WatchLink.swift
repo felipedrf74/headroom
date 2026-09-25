@@ -7,6 +7,11 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     static let shared = WatchLink()
     static let readingsKey = "readings"
 
+    private let lock = NSLock()
+    /// The newest readings, kept until the session can take them: activation finishes after
+    /// the first refresh, and the Watch app may be installed later.
+    private var latest: Data?
+
     func activate() {
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
@@ -15,15 +20,27 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
 
     /// Replaces what the Watch last got; only the newest readings matter.
     func send(_ cache: ReadingCache) {
-        guard WCSession.isSupported() else { return }
+        guard WCSession.isSupported(), let data = try? RelayEnvelope.encoder.encode(cache) else { return }
+        lock.withLock { latest = data }
+        flush()
+    }
+
+    private func flush() {
         let session = WCSession.default
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled,
-              let data = try? RelayEnvelope.encoder.encode(cache)
+              let data = lock.withLock({ latest })
         else { return }
         try? session.updateApplicationContext([Self.readingsKey: data])
     }
 
-    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        flush()
+    }
+
+    /// Pairing changed, or the Watch app was installed or removed.
+    func sessionWatchStateDidChange(_ session: WCSession) {
+        flush()
+    }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
 
