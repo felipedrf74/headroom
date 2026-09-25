@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # The iPhone app calls iOS 27 APIs behind availability checks, so it needs the Xcode 27 SDKs.
+      - name: Select Xcode 27
+        run: |
+          xcode="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          if [[ -z "$xcode" ]]; then
+            echo "::error::This runner image has no Xcode 27. Installed: $(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Typecheck Shared for macOS, iOS, and watchOS
+        run: ./scripts/typecheck-shared.sh
+
+      # Without Config/Local.xcconfig the Mac app is ad-hoc signed, which is all tests need.
+      - name: Mac tests
+        run: xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'platform=macOS'
+
+      - name: iPhone app, widgets, and Watch app
+        run: >
+          xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile
+          -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+
+      - name: Command Line Tools build
+        run: TOKENROOM_FORCE_SWIFTC=1 ./scripts/build.sh

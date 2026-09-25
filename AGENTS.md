@@ -1,8 +1,8 @@
 # Tokenroom
 
-macOS menu-bar app that shows weekly (or billing-cycle) subscription usage for Grok, Claude, OpenAI/Codex, and Cursor. Formerly Headroom (renamed in 2.0; `LegacyMigration` imports Headroom 1.x settings).
+AI usage for 19 providers: a macOS menu-bar app that reads each tool's login, plus an iPhone app with widgets and a Live Activity, and an Apple Watch app with complications, fed through the user's private iCloud. Formerly Headroom (renamed in 2.0; `LegacyMigration` imports Headroom 1.x settings).
 
-Read `.grok/skills/tokenroom-macos/SKILL.md` before changing UI, tokens, MenuBarExtra behavior, or provider adapters. That skill is the source of truth for tokens, collapse rules, and provider contracts.
+Read `.grok/skills/tokenroom-macos/SKILL.md` before changing the Mac app's UI, tokens, MenuBarExtra behavior, or provider adapters, and `.grok/skills/tokenroom-apple/SKILL.md` before changing the iPhone, widgets, Watch, alerts, or the iCloud relay. Those skills are the source of truth.
 
 Do not put personal names, emails, user IDs, or tokens in source, fixtures, logs, or the snapshot cache. Bundle ID is `app.tokenroom.mac`.
 
@@ -24,4 +24,8 @@ Tokenroom only reads other tools' sessions. Never refresh, rewrite, or copy thei
 
 ```bash
 xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'platform=macOS'
+./scripts/typecheck-shared.sh
+xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile -destination 'generic/platform=iOS Simulator'
 ```
+
+Shared logic (relay, alerts, ranking, parsers) is tested on the Mac. The last command also builds the widgets, the Watch app, and its complications. CI (`.github/workflows/ci.yml`) runs all three on Xcode 27.

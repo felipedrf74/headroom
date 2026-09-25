@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Subscription quota in the macOS menu bar.</strong><br>
-  Claude, Codex, Grok, Cursor, Copilot, and 14 more: used percent and reset time, read on this Mac.
+  Claude, Codex, Grok, Cursor, Copilot, and 14 more: used percent and reset time on your Mac, iPhone, and Apple Watch.
 </p>
 
 <p align="center">
@@ -65,6 +65,19 @@ Each of those tools already knows how much quota you have left. None of them put
 - **Three looks.** Percents, vertical used-bars, or only the highest. Refresh every 5, 10, 15, or 30 minutes. Launch at login if you want.
 
 Numbers in the screenshots are sample data.
+
+## iPhone and Apple Watch
+
+Tokenroom for iPhone shows the same meters, pace, and a week of history. They come from your Mac through your own iCloud. The iPhone also reads coding-plan, pay-as-you-go, and organization providers itself, with keys you add there. It adds:
+
+- Home Screen and Lock Screen widgets
+- a Live Activity that follows a session, or a nearly spent week, to its reset
+- alerts at 80% and 95%, when a busy window resets, and for banked resets. Each goes out once across your devices and respects quiet hours.
+- News: new models from the labs you follow, and official changelogs
+
+The Apple Watch app and its complications read the same iCloud records, so they keep working with the iPhone away. To send your Mac's readings, turn on **Settings → iPhone & Watch** in the signed download of Tokenroom for Mac. A copy you build and sign yourself can't use iCloud.
+
+Tokenroom for iPhone and Apple Watch is on its way to the App Store. It has a sample mode for looking around first.
 
 ## Install
 
