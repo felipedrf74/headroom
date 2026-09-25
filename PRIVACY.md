@@ -1,6 +1,6 @@
 # Privacy
 
-Tokenroom runs on your Mac. There is no Tokenroom account and no Tokenroom server. Syncing to your iPhone and Apple Watch goes through your own iCloud account.
+Tokenroom runs on your Mac and iPhone. There is no Tokenroom account and no Tokenroom server. Syncing between your devices goes through your own iCloud account.
 
 ## What Tokenroom reads
 
@@ -49,6 +49,13 @@ On first launch after the rename from Headroom, Tokenroom copies Headroom’s se
 ## iPhone and Apple Watch
 
 When iPhone sync is on, the signed Mac app writes the same readings as `snapshots.json`, plus the hourly history, to a private database in your iCloud account. Only your devices signed in to that account can read it. Turning iPhone sync off stops new writes.
+
+On iPhone, Tokenroom keeps:
+
+- the latest readings and a week of history in its App Group container, so its widgets can show them
+- API keys you add there in the iPhone’s Keychain, readable only by Tokenroom and its widgets, never synced
+
+When you add keys on the iPhone, it writes its own readings (never the keys) to the same iCloud database, so your other devices can show them. **Settings → Delete Tokenroom Data from iCloud** removes every Tokenroom record there, from all your devices.
 
 The records never contain tokens, API keys, email addresses, names, account or organization IDs, or file paths.
 

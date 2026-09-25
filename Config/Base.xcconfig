@@ -8,6 +8,8 @@ TOKENROOM_TEAM_ID =
 // iCloud container and App Group derive from the prefix. A fork on another team changes the prefix.
 TOKENROOM_CK_CONTAINER = iCloud.$(TOKENROOM_BUNDLE_PREFIX)
 TOKENROOM_APP_GROUP = group.$(TOKENROOM_BUNDLE_PREFIX)
+// Keychain group for API keys the iPhone app and its widgets share; the team prefix is added per target.
+TOKENROOM_KEYCHAIN_GROUP = $(TOKENROOM_BUNDLE_PREFIX).shared
 
 DEVELOPMENT_TEAM = $(TOKENROOM_TEAM_ID)
 SWIFT_VERSION = 6.0

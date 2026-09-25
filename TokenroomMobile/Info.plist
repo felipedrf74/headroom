@@ -4,6 +4,21 @@
 <dict>
 	<key>TokenroomCloudContainer</key>
 	<string>$(TOKENROOM_CK_CONTAINER)</string>
+	<key>TokenroomAppGroup</key>
+	<string>$(TOKENROOM_APP_GROUP)</string>
+	<key>TokenroomKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)$(TOKENROOM_KEYCHAIN_GROUP)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tokenroom</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

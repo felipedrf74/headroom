@@ -9,18 +9,21 @@ struct TokenroomMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            UsageListView(store: store)
+            RootView(store: store)
                 .task {
                     appDelegate.store = store
-                    // Readings first; the permission prompt can wait for the person to answer.
-                    await store.refresh()
+                    await store.refresh(force: true)
                     await store.prepareNotifications()
-                    _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         Task { await store.refresh() }
                     }
+                }
+                .onChange(of: store.hasOnboarded, initial: true) { _, onboarded in
+                    // Ask once the person has chosen how to use Tokenroom, not on first sight.
+                    guard onboarded, !store.sampleMode else { return }
+                    Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
                 }
         }
     }
