@@ -48,8 +48,9 @@ final class SignInCoordinator {
     private func run(_ provider: Provider) async {
         phase = .running(provider)
         CredentialReaders.invalidateCaches()
-        let baseline = CredentialReaders.sessionStamp(provider)
-        if CredentialReaders.hasUsableSession(provider) {
+        CredentialReaders.invalidateKeychainServices()
+        let baseline = await BlockingIO.run { CredentialReaders.sessionStamp(provider) }
+        if await BlockingIO.run({ CredentialReaders.hasUsableSession(provider) }) {
             finishSuccess(provider)
             return
         }
@@ -69,7 +70,10 @@ final class SignInCoordinator {
                 phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)
                 return
             }
-            let resetDeadSession = provider == .claude && !((try? CredentialReaders.claudeAuth())?.canRefresh ?? false)
+            var resetDeadSession = false
+            if provider == .claude {
+                resetDeadSession = await BlockingIO.run { !((try? CredentialReaders.claudeAuth())?.canRefresh ?? false) }
+            }
             launchInTerminal(
                 executable: executable,
                 arguments: provider.loginArguments,
@@ -78,9 +82,15 @@ final class SignInCoordinator {
         }
 
         let deadline = Date().addingTimeInterval(180)
+        var polls = 0
         while !Task.isCancelled, Date() < deadline {
             CredentialReaders.invalidateCaches()
-            if sessionBecameUsable(provider, baseline: baseline) {
+            polls += 1
+            if polls % 10 == 0 {
+                // A new login can land in a new `Claude Code-credentials-…` item.
+                CredentialReaders.invalidateKeychainServices()
+            }
+            if await sessionBecameUsable(provider, baseline: baseline) {
                 finishSuccess(provider)
                 return
             }
@@ -92,20 +102,23 @@ final class SignInCoordinator {
             return
         }
         CredentialReaders.invalidateCaches()
-        if sessionBecameUsable(provider, baseline: baseline) {
+        CredentialReaders.invalidateKeychainServices()
+        if await sessionBecameUsable(provider, baseline: baseline) {
             finishSuccess(provider)
         } else {
             phase = .failed(provider, "Couldn't finish \(provider.displayName) sign-in.")
         }
     }
 
-    private func sessionBecameUsable(_ provider: Provider, baseline: String?) -> Bool {
-        guard CredentialReaders.hasUsableSession(provider) else { return false }
-        let stamp = CredentialReaders.sessionStamp(provider)
-        if baseline == nil {
-            return stamp != nil
+    private func sessionBecameUsable(_ provider: Provider, baseline: String?) async -> Bool {
+        await BlockingIO.run {
+            guard CredentialReaders.hasUsableSession(provider) else { return false }
+            let stamp = CredentialReaders.sessionStamp(provider)
+            if baseline == nil {
+                return stamp != nil
+            }
+            return stamp != baseline
         }
-        return stamp != baseline
     }
 
     private func finishSuccess(_ provider: Provider) {

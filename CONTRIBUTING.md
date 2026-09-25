@@ -23,7 +23,11 @@ There is no Dock icon. After launch, look at the right side of the menu bar.
 
 ## Tests
 
-Parser and sign-in tests live in `TokenroomTests`. Run them from Xcode when it is installed.
+Parser, sign-in, and foundation tests live in `TokenroomTests`. Run them from Xcode, or:
+
+```bash
+xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'platform=macOS'
+```
 
 ## Sending a change
 

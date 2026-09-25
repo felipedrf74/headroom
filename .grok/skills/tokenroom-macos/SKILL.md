@@ -55,17 +55,19 @@ Protocol `ProviderClient.fetch() async -> Result<QuotaSnapshot, ProviderError>`.
 
 | Extra | Primary meter | Label | Auth | Notes |
 |---|---|---|---|---|
-| Grok Build | Weekly pool | Weekly | `~/.grok/auth.json` | Missing `creditUsagePercent` on a weekly unified period means 0. Refresh OIDC via `https://auth.x.ai/oauth2/token`. Sign in runs `grok login --device-auth`. |
+| Grok Build | Weekly pool | Weekly | `~/.grok/auth.json` | Missing `creditUsagePercent` on a weekly unified period means 0. Read-only: the token is used only while `expires_at` is ahead; never refreshed or written back (the CLI may rotate its refresh token). Sign in runs `grok login --device-auth`. |
 | Grok Bot | Weekly pool | Weekly | Cursor `state.vscdb` token | `POST …/GetSandUsageStatus`. Separate from Grok Build. Sign in opens Grok Bot (`com.anysphere.sand`), then Cursor. Wait on a readable access token, not `state.vscdb` mtime (WAL writes do not bump the main file). |
-| Claude | 7-day window | Weekly | Keychain `Claude Code-credentials` via `/usr/bin/security` | Refresh expired OAuth at `platform.claude.com/v1/oauth/token`. 5-hour window is popover-only. Sign in runs `claude auth login`. |
+| Claude | 7-day window | Weekly | Keychain `Claude Code-credentials` via `/usr/bin/security` | Read-only: the access token is used only while valid; never refreshed or written back. On a 401 the Keychain is read once more in case Claude Code replaced the token. User-Agent is built from the installed CLI version. 5-hour window is popover-only. Sign in runs `claude auth login`. |
 | OpenAI | Weekly window | Weekly | `~/.codex/auth.json` | If `secondary_window` is null, a `primary_window` with `limit_window_seconds >= 6 days` is the weekly meter. Sign in runs `codex login --device-auth`. |
 | Cursor | `max(auto%, api%)` | This cycle | Cursor `state.vscdb` | Monthly billing cycle, never “Weekly”. Sign in opens Cursor. |
 
-Timeout 8s. 401/403 → expired. Independent last-good cache in `~/Library/Application Support/Tokenroom/`. Coalesce overlapping refreshes. Persist the snapshot cache once per cycle. Reuse the Cursor token for Grok Bot within 20s. Reuse a non-expired Claude keychain read.
+Timeout 12s per request, 20s per provider. 401/403 → expired; an expired session keeps its last reading, faded, for 24 h. 429 → rate limited until Retry-After (clamped to 1 min–6 h) and the provider is skipped until then. `notEntitled` (e.g. Grok Bot off-plan) shows the reason without Sign In. Credential reads (files, SQLite, `/usr/bin/security`) run through `BlockingIO`, never on the main thread or the cooperative pool. Every request passes its `Provider` explicitly and carries the `Tokenroom/<version>` User-Agent. Independent last-good cache in `~/Library/Application Support/Tokenroom/`. Coalesce overlapping refreshes. Persist the snapshot cache once per cycle. Reuse the Cursor token for Grok Bot within 20s. Reuse a non-expired Claude keychain read.
 
 Signed-out cards show a **Sign In** button. Settings → Accounts shows connection status. Turning a provider off does not log the user out of that provider. If a session is already usable, Sign In finishes immediately instead of waiting. A Claude Keychain item with an expired refresh token is not usable — Sign In runs `claude auth logout` then `claude auth login`. The CLI is `claude` on PATH, otherwise the newest binary in `~/.local/share/claude/versions` or Claude Desktop’s bundled `claude`. Keychain services `Claude Code-credentials` and `Claude Code-credentials-*` are both read. Network timeouts stay unreachable (last good reading), not expired.
 
-Popover icons load through `TokenroomImage` (`NSImage` from the asset catalog or loose `Resources` PNGs). SwiftUI `Image("name")` alone misses files that are not in an `.car`. Menu-bar glyphs fall back to Canvas marks if the PNG is missing. Meter fill is clipped to the track capsule; 0% used draws no fill.
+Popover icons load through `TokenroomImage` (`NSImage` from the asset catalog or loose `Resources` PNGs/SVGs; the swiftc fallback ships loose files). SwiftUI `Image("name")` alone misses files that are not in an `.car`. Menu-bar glyphs fall back to Canvas marks if the image is missing.
+
+Settings v2: the saved enabled list is authoritative for every provider in `knownProviders` (an empty list stays empty). A provider the settings never saw starts enabled only if `enabledByDefault` or a local session is detected. Meter fill is clipped to the track capsule; 0% used draws no fill.
 
 ## Copy
 

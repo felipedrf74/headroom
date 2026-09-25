@@ -19,6 +19,12 @@
 /* Begin PBXFileReference section */
 		AA0000000000000000000004 /* Tokenroom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tokenroom.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000005 /* TokenroomTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TokenroomTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CF0000000000000000000001 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000002 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000003 /* MacSigning.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MacSigning.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000004 /* Mac.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Mac.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000005 /* MacTests.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MacTests.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000006 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Local.xcconfig.example; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +61,7 @@
 		AA0000000000000000000009 = {
 			isa = PBXGroup;
 			children = (
+				CF0000000000000000000010 /* Config */,
 				AA0000000000000000000006 /* Tokenroom */,
 				AA0000000000000000000007 /* TokenroomTests */,
 				AA0000000000000000000010 /* Products */,
@@ -68,6 +75,19 @@
 				AA0000000000000000000005 /* TokenroomTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		CF0000000000000000000010 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				CF0000000000000000000001 /* Base.xcconfig */,
+				CF0000000000000000000002 /* Version.xcconfig */,
+				CF0000000000000000000003 /* MacSigning.xcconfig */,
+				CF0000000000000000000004 /* Mac.xcconfig */,
+				CF0000000000000000000005 /* MacTests.xcconfig */,
+				CF0000000000000000000006 /* Local.xcconfig.example */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -198,13 +218,13 @@
 /* Begin XCBuildConfiguration section */
 		CC0000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000001 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -216,19 +236,18 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		CC0000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000001 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -236,19 +255,15 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
 		CC0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000004 /* Mac.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Tokenroom/Tokenroom.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -262,25 +277,19 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.2;
 				OTHER_LDFLAGS = "-lsqlite3";
-				PRODUCT_BUNDLE_IDENTIFIER = app.tokenroom.mac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		CC0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000004 /* Mac.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Tokenroom/Tokenroom.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -294,48 +303,35 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.2;
 				OTHER_LDFLAGS = "-lsqlite3";
-				PRODUCT_BUNDLE_IDENTIFIER = app.tokenroom.mac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
 		CC0000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000005 /* MacTests.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.2;
-				PRODUCT_BUNDLE_IDENTIFIER = app.tokenroom.mac.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tokenroom.app/Contents/MacOS/Tokenroom";
 			};
 			name = Debug;
 		};
 		CC0000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000005 /* MacTests.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.2;
-				PRODUCT_BUNDLE_IDENTIFIER = app.tokenroom.mac.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tokenroom.app/Contents/MacOS/Tokenroom";
 			};
 			name = Release;

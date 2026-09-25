@@ -3,9 +3,19 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    let store = QuotaStore()
+    let store: QuotaStore
     private var statusItem: StatusItemController?
     private var settingsWindow: NSWindow?
+
+    override init() {
+        // Headroom 1.x settings and cache must be in place before the store reads them.
+        LegacyMigration.runIfNeeded()
+        store = QuotaStore(
+            settings: AppSettings(detectsSession: { CredentialReaders.hasSession($0) }),
+            showsLegacyNotice: LegacyMigration.shouldShowNotice()
+        )
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.start()

@@ -58,7 +58,15 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(snapshot.primaryTitle, "Weekly")
         XCTAssertEqual(snapshot.provider, .grokBot)
         XCTAssertNotNil(snapshot.resetsAt)
-        XCTAssertEqual(snapshot.windows.last?.title, "SuperGrok Heavy")
+        XCTAssertEqual(snapshot.planLabel, "SuperGrok Heavy")
+        XCTAssertEqual(snapshot.windows.map(\.id), ["weekly"])
+    }
+
+    func testGrokBotOffPlanIsNotEntitled() {
+        let data = Data(#"{"hasNonZeroIncludedLimit": false, "usagePercent": 0}"#.utf8)
+        XCTAssertThrowsError(try GrokBotParser.snapshot(from: data)) { error in
+            XCTAssertEqual(error as? ProviderError, .notEntitled("Grok Bot isn't on this Cursor plan."))
+        }
     }
 
     func testMeterFillLengthClipsAndDropsEmpty() {
@@ -143,26 +151,6 @@ final class ParserTests: XCTestCase {
         let deadAuth = try CredentialReaders.parseClaudeAuth(deadRefresh, account: "test", service: "svc")
         XCTAssertTrue(deadAuth.isExpired)
         XCTAssertFalse(deadAuth.canRefresh)
-    }
-
-    func testClaudeRefreshPreservesSiblingKeys() throws {
-        let json = """
-        {"mcpOAuth":{"keep":true},"claudeAiOauth":{"accessToken":"old","refreshToken":"r1","expiresAt":1,"scopes":["user:inference"]}}
-        """
-        let updated = try CredentialReaders.applyingClaudeRefresh(
-            to: json,
-            accessToken: "new",
-            refreshToken: "r2",
-            expiresIn: 100,
-            now: Date(timeIntervalSince1970: 1_000)
-        )
-        let object = try JSONSerialization.jsonObject(with: Data(updated.utf8)) as! [String: Any]
-        XCTAssertEqual((object["mcpOAuth"] as? [String: Any])?["keep"] as? Bool, true)
-        let oauth = object["claudeAiOauth"] as! [String: Any]
-        XCTAssertEqual(oauth["accessToken"] as? String, "new")
-        XCTAssertEqual(oauth["refreshToken"] as? String, "r2")
-        XCTAssertEqual((oauth["expiresAt"] as? NSNumber)?.intValue, 1_100_000)
-        XCTAssertEqual(oauth["scopes"] as? [String], ["user:inference"])
     }
 
     func testPercentTextKeepsTenthWhenItMatters() {

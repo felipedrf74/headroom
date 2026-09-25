@@ -22,6 +22,8 @@
 
 Tokenroom is a menu-bar extra. It does not live in the Dock. It reuses logins you already have. It does not ask for API keys, and it does not keep names, emails, or tokens on disk.
 
+Tokenroom was called Headroom until 2.0. On first launch it brings over Headroom’s settings and last readings; quit Headroom and move it to the Trash afterwards.
+
 <p align="center">
   <img src="docs/images/menubar.png" width="920" alt="Tokenroom in the macOS menu bar">
 </p>
@@ -60,7 +62,7 @@ Numbers in the screenshots are sample data.
 There is no notarized download yet. Build on the Mac that will run it:
 
 ```bash
-git clone https://github.com/felipedrf74/headroom.git
+git clone https://github.com/felipedrf74/headroom.git tokenroom
 cd tokenroom
 ./scripts/build.sh
 open /Applications/Tokenroom.app
@@ -81,7 +83,7 @@ The build is ad-hoc signed and **not sandboxed** — it has to read CLI credenti
 
 The same controls live in **Settings → Accounts**. Turning a provider off hides it from Tokenroom; it does not log you out of that provider.
 
-Claude tokens expire about every eight hours. Tokenroom refreshes them the same way Claude Code does and writes the new tokens back to Keychain, leaving MCP secrets in that item untouched.
+Tokenroom only reads sessions. It never refreshes or rewrites another tool’s tokens. Claude and Grok sessions expire after a few hours; until you use `claude` or `grok` again (which refreshes them), Tokenroom keeps showing the last reading, faded, for up to a day.
 
 ## Privacy
 
@@ -98,6 +100,8 @@ Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at l
 ```
 
 DerivedData is forced to `~/Library/Developer/Xcode/DerivedData/Tokenroom`. UI, tokens, and provider contracts: [`.grok/skills/tokenroom-macos/SKILL.md`](.grok/skills/tokenroom-macos/SKILL.md).
+
+Build settings live in `Config/*.xcconfig`. Builds are ad-hoc signed by default. To sign with your own team, copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (git-ignored) and set `TOKENROOM_TEAM_ID` and `TOKENROOM_MAC_SIGNING = team`. `TOKENROOM_FORCE_SWIFTC=1 ./scripts/build.sh` exercises the Command Line Tools fallback.
 
 `main` is protected. Send a change as a pull request from a fork; the maintainer has to approve it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -69,12 +69,13 @@ struct CursorClient: ProviderClient {
 
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
-            let token = try CredentialReaders.cursorAccessToken()
+            let token = try await BlockingIO.run { try CredentialReaders.cursorAccessToken() }
             let url = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage")!
             let data = try await TokenroomHTTP.post(
                 url,
                 token: token,
-                headers: ["Connect-Protocol-Version": "1"]
+                headers: ["Connect-Protocol-Version": "1"],
+                provider: .cursor
             )
             return .success(try CursorParser.snapshot(from: data))
         } catch let error as ProviderError {

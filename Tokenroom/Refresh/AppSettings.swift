@@ -42,28 +42,55 @@ final class AppSettings {
     private let defaults: UserDefaults
     private var isReady = false
 
-    init(defaults: UserDefaults = .standard) {
+    enum Keys {
+        static let version = "settingsVersion"
+        static let enabled = "enabledProviders"
+        static let known = "knownProviders"
+        static let refreshMinutes = "refreshMinutes"
+        static let menuStyle = "menuStyle"
+    }
+
+    static let currentVersion = 2
+
+    /// - Parameter detectsSession: whether a provider this install has never seen already has a
+    ///   local session. Such providers start enabled; others wait in Settings.
+    init(defaults: UserDefaults = .standard, detectsSession: (Provider) -> Bool = { _ in false }) {
         self.defaults = defaults
-        var enabledProviders = Set(Provider.allCases)
-        if let raw = defaults.array(forKey: "enabledProviders") as? [String] {
-            let parsed = Set(raw.compactMap(Provider.init(rawValue:)))
-            if !parsed.isEmpty {
-                enabledProviders = parsed
-                if !raw.contains(Provider.grokBot.rawValue) {
-                    enabledProviders.insert(.grokBot)
-                }
-            }
-        }
-        enabled = enabledProviders
-        let minutes = defaults.object(forKey: "refreshMinutes") as? Int ?? 10
+        enabled = Self.resolveEnabled(defaults: defaults, detectsSession: detectsSession)
+        let minutes = defaults.object(forKey: Keys.refreshMinutes) as? Int ?? 10
         refreshMinutes = [5, 10, 15, 30].contains(minutes) ? minutes : 10
-        if let raw = defaults.string(forKey: "menuStyle"), let style = MenuBarStyle(rawValue: raw) {
+        if let raw = defaults.string(forKey: Keys.menuStyle), let style = MenuBarStyle(rawValue: raw) {
             menuStyle = style
         } else {
             menuStyle = .meters
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
         isReady = true
+        persist()
+    }
+
+    /// The saved list is authoritative for every provider the saved settings already knew,
+    /// including an empty list. Only providers the settings never saw get default handling.
+    private static func resolveEnabled(defaults: UserDefaults, detectsSession: (Provider) -> Bool) -> Set<Provider> {
+        let saved = (defaults.array(forKey: Keys.enabled) as? [String]).map {
+            Set($0.compactMap(Provider.init(rawValue:)))
+        }
+        let known: Set<Provider>
+        if defaults.integer(forKey: Keys.version) >= 2 {
+            known = Set((defaults.array(forKey: Keys.known) as? [String] ?? []).compactMap(Provider.init(rawValue:)))
+        } else if saved != nil {
+            // Version 1 stored only the enabled list; it knew Headroom 1.x's providers.
+            known = Provider.legacy
+        } else {
+            known = []
+        }
+        var enabled = saved ?? []
+        for provider in Provider.allCases where !known.contains(provider) {
+            if provider.enabledByDefault || detectsSession(provider) {
+                enabled.insert(provider)
+            }
+        }
+        return enabled
     }
 
     func isEnabled(_ provider: Provider) -> Bool {
@@ -80,9 +107,11 @@ final class AppSettings {
 
     private func persist() {
         guard isReady else { return }
-        defaults.set(enabled.map(\.rawValue).sorted(), forKey: "enabledProviders")
-        defaults.set(refreshMinutes, forKey: "refreshMinutes")
-        defaults.set(menuStyle.rawValue, forKey: "menuStyle")
+        defaults.set(Self.currentVersion, forKey: Keys.version)
+        defaults.set(enabled.map(\.rawValue).sorted(), forKey: Keys.enabled)
+        defaults.set(Provider.allCases.map(\.rawValue).sorted(), forKey: Keys.known)
+        defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
+        defaults.set(menuStyle.rawValue, forKey: Keys.menuStyle)
     }
 
     private func applyLaunchAtLogin() {

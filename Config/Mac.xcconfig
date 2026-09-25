@@ -1,0 +1,12 @@
+// Tokenroom for Mac (menu-bar collector).
+#include "Version.xcconfig"
+
+PRODUCT_BUNDLE_IDENTIFIER = $(TOKENROOM_BUNDLE_PREFIX).mac
+MARKETING_VERSION = $(TOKENROOM_MAC_VERSION)
+CURRENT_PROJECT_VERSION = $(TOKENROOM_MAC_BUILD)
+
+TOKENROOM_MAC_ENTITLEMENTS_adhoc = Tokenroom/Tokenroom.entitlements
+TOKENROOM_MAC_ENTITLEMENTS_team = Tokenroom/Tokenroom.entitlements
+CODE_SIGN_ENTITLEMENTS = $(TOKENROOM_MAC_ENTITLEMENTS_$(TOKENROOM_MAC_SIGNING))
+
+#include "MacSigning.xcconfig"

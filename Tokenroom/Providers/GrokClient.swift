@@ -65,14 +65,14 @@ struct GrokClient: ProviderClient {
 
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
-            let auth = try CredentialReaders.grokAuth()
-            let token = try await CredentialReaders.refreshGrokIfNeeded(auth)
+            let auth = try await BlockingIO.run { try CredentialReaders.grokAuth() }
+            let token = try CredentialReaders.usableGrokToken(auth)
             let url = URL(string: "https://cli-chat-proxy.grok.com/v1/billing?format=credits")!
             var headers: [String: String] = [:]
             if let userID = auth.userID {
                 headers["x-userid"] = userID
             }
-            let data = try await TokenroomHTTP.get(url, token: token, headers: headers)
+            let data = try await TokenroomHTTP.get(url, token: token, headers: headers, provider: .grok)
             return .success(try GrokParser.snapshot(from: data))
         } catch let error as ProviderError {
             return .failure(error)

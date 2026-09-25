@@ -1,0 +1,7 @@
+// Copy to Config/Local.xcconfig (git-ignored) and fill in.
+
+// Your Apple Developer Team ID (developer.apple.com → Membership).
+TOKENROOM_TEAM_ID = XXXXXXXXXX
+
+// adhoc (default) or team. iPhone & Apple Watch sync needs team.
+TOKENROOM_MAC_SIGNING = team

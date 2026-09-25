@@ -112,7 +112,7 @@ struct OpenAIClient: ProviderClient {
 
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
-            let auth = try CredentialReaders.codexAuth()
+            let auth = try await BlockingIO.run { try CredentialReaders.codexAuth() }
             let url = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
             var headers = [
                 "OpenAI-Beta": "codex-1",
@@ -121,7 +121,7 @@ struct OpenAIClient: ProviderClient {
             if let accountID = auth.accountID {
                 headers["ChatGPT-Account-ID"] = accountID
             }
-            let data = try await TokenroomHTTP.get(url, token: auth.accessToken, headers: headers)
+            let data = try await TokenroomHTTP.get(url, token: auth.accessToken, headers: headers, provider: .openai)
             return .success(try OpenAIParser.snapshot(from: data))
         } catch let error as ProviderError {
             return .failure(error)

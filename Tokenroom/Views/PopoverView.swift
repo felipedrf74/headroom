@@ -12,6 +12,12 @@ struct PopoverView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 12)
 
+            if store.showsLegacyNotice {
+                legacyNotice
+                    .padding(.horizontal, TokenroomTokens.cardPadding)
+                    .padding(.bottom, TokenroomTokens.cardGap)
+            }
+
             let providers = store.popoverProviders
             if providers.isEmpty {
                 emptyProviders
@@ -45,6 +51,7 @@ struct PopoverView: View {
                 ProviderCard(
                     provider: provider,
                     status: store.statuses[provider] ?? .loading,
+                    checkedAt: store.lastChecked(provider),
                     signInPhase: store.signIn.phase,
                     onSignIn: { store.signIn.signIn(provider) },
                     onCancelSignIn: { store.signIn.cancel() },
@@ -53,6 +60,37 @@ struct PopoverView: View {
             }
         }
         .padding(.horizontal, TokenroomTokens.cardPadding)
+    }
+
+    private var legacyNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Tokenroom replaces Headroom")
+                .font(.system(size: TokenroomTokens.popoverNameSize, weight: .semibold))
+            Text("Quit Headroom and move it to the Trash so only one extra runs.")
+                .font(.system(size: TokenroomTokens.captionSize))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                if LegacyMigration.isLegacyAppRunning {
+                    Button("Quit Headroom") {
+                        store.quitLegacyApp()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Button("Dismiss") {
+                    store.dismissLegacyNotice()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: TokenroomTokens.captionSize, weight: .medium))
+            }
+        }
+        .padding(TokenroomTokens.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        )
     }
 
     private var emptyProviders: some View {

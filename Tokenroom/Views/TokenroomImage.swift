@@ -36,6 +36,14 @@ enum TokenroomImage {
             }
             found = true
         }
-        return found ? image : nil
+        if found {
+            return image
+        }
+        // Vector glyphs ship as loose SVGs in swiftc builds (no Assets.car there).
+        if let url = bundle.url(forResource: name, withExtension: "svg"),
+           let vector = NSImage(contentsOf: url), vector.isValid {
+            return vector
+        }
+        return nil
     }
 }

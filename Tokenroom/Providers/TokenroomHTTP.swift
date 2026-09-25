@@ -3,6 +3,8 @@ import Foundation
 enum TokenroomHTTP {
     static let timeout: TimeInterval = 12
     static let fetchBudget: TimeInterval = 20
+    /// Wait used when a 429 carries no usable Retry-After.
+    static let defaultRetryAfter: TimeInterval = 15 * 60
 
     static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -15,6 +17,7 @@ enum TokenroomHTTP {
         configuration.httpCookieAcceptPolicy = .never
         configuration.httpShouldSetCookies = false
         configuration.httpMaximumConnectionsPerHost = 5
+        configuration.httpAdditionalHeaders = ["User-Agent": TokenroomIdentity.userAgent]
         return URLSession(configuration: configuration)
     }()
 
@@ -37,18 +40,33 @@ enum TokenroomHTTP {
         }
     }
 
-    static func mapStatus(_ status: Int, provider: Provider) -> ProviderError? {
+    static func mapStatus(_ status: Int, retryAfter: String? = nil, provider: Provider, now: Date = .now) -> ProviderError? {
         switch status {
         case 200..<300:
             nil
         case 401, 403:
             .expired(provider.expiredHint)
+        case 429:
+            .rateLimited(until: retryDate(retryAfter, now: now))
         default:
             .unreachable
         }
     }
 
-    static func get(_ url: URL, token: String, headers: [String: String] = [:], provider: Provider? = nil) async throws -> Data {
+    /// Retry-After as delta-seconds or an HTTP date.
+    static func retryDate(_ value: String?, now: Date = .now) -> Date? {
+        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+        if let seconds = TimeInterval(value), seconds >= 0 {
+            return now.addingTimeInterval(seconds)
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value)
+    }
+
+    static func get(_ url: URL, token: String, headers: [String: String] = [:], provider: Provider) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -56,14 +74,10 @@ enum TokenroomHTTP {
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
-        let (data, response) = try await data(for: request)
-        if let error = mapStatus(response.statusCode, provider: provider ?? inferredProvider(from: url)) {
-            throw error
-        }
-        return data
+        return try await send(request, provider: provider)
     }
 
-    static func post(_ url: URL, token: String, headers: [String: String] = [:], body: Data = Data("{}".utf8), provider: Provider? = nil) async throws -> Data {
+    static func post(_ url: URL, token: String, headers: [String: String] = [:], body: Data = Data("{}".utf8), provider: Provider) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body
@@ -73,19 +87,19 @@ enum TokenroomHTTP {
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
+        return try await send(request, provider: provider)
+    }
+
+    private static func send(_ request: URLRequest, provider: Provider) async throws -> Data {
         let (data, response) = try await data(for: request)
-        if let error = mapStatus(response.statusCode, provider: provider ?? inferredProvider(from: url)) {
+        if let error = mapStatus(
+            response.statusCode,
+            retryAfter: response.value(forHTTPHeaderField: "Retry-After"),
+            provider: provider
+        ) {
             throw error
         }
         return data
-    }
-
-    private static func inferredProvider(from url: URL) -> Provider {
-        let host = url.host ?? ""
-        if host.contains("anthropic") { return .claude }
-        if host.contains("openai") || host.contains("chatgpt") { return .openai }
-        if host.contains("cursor") { return .cursor }
-        return .grok
     }
 }
 

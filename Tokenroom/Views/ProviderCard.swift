@@ -3,6 +3,8 @@ import SwiftUI
 struct ProviderCard: View {
     var provider: Provider
     var status: ProviderStatus
+    /// Last successful check; stale captions use it instead of when the value first appeared.
+    var checkedAt: Date?
     var signInPhase: SignInCoordinator.Phase = .idle
     var onSignIn: () -> Void = {}
     var onCancelSignIn: () -> Void = {}
@@ -16,14 +18,31 @@ struct ProviderCard: View {
                 caption("Refreshing…")
             case .live(let snapshot), .stale(let snapshot):
                 snapshotBlock(snapshot, stale: status.isStale)
-            case .signedOut(let hint), .expired(let hint):
+            case .signedOut(let hint):
                 header(percent: nil, remaining: 100, stale: false)
                 caption(hint)
                 signInControls
+            case .expired(let hint, let cached):
+                if let cached {
+                    snapshotBlock(cached, stale: true)
+                } else {
+                    header(percent: nil, remaining: 100, stale: false)
+                }
+                caption(hint)
+                signInControls
+            case .notEntitled(let hint):
+                header(percent: nil, remaining: 100, stale: false)
+                caption(hint)
+            case .rateLimited(let until, let cached):
+                if let cached {
+                    snapshotBlock(cached, stale: true)
+                } else {
+                    header(percent: nil, remaining: 100, stale: false)
+                }
+                caption("Couldn't refresh. \(provider.displayName) asked to wait until \(until.formatted(date: .omitted, time: .shortened)).")
             case .unreachable(let cached):
                 if let cached {
                     snapshotBlock(cached, stale: true)
-                    caption("Last good reading, \(RelativeTime.ago(cached.fetchedAt)).")
                 } else {
                     header(percent: nil, remaining: 100, stale: false)
                     caption("Couldn't reach \(provider.displayName).")
@@ -101,8 +120,11 @@ struct ProviderCard: View {
         ForEach(extraWindows(snapshot)) { window in
             caption(windowCaption(window))
         }
+        if let plan = snapshot.planLabel, plan != snapshot.primaryTitle {
+            caption(plan)
+        }
         if stale {
-            caption("Last good reading, \(RelativeTime.ago(snapshot.fetchedAt)).")
+            caption("Last good reading, \(RelativeTime.ago(checkedAt ?? snapshot.fetchedAt)).")
         }
     }
 
@@ -140,7 +162,7 @@ struct ProviderCard: View {
     }
 
     private func extraWindows(_ snapshot: QuotaSnapshot) -> [QuotaWindow] {
-        Array(snapshot.windows.dropFirst()).filter { $0.id != "plan" || $0.title != snapshot.primaryTitle }
+        Array(snapshot.windows.dropFirst())
     }
 
     private func windowCaption(_ window: QuotaWindow) -> String {

@@ -7,13 +7,20 @@ import os
 @MainActor
 final class QuotaStore {
     var statuses: [Provider: ProviderStatus] = [:]
+    /// Last successful fetch per provider, even when usage didn't change.
+    var checkedAt: [Provider: Date] = [:]
     var lastAttempt: Date?
     var isRefreshing = false
     var settings: AppSettings
+    var showsLegacyNotice: Bool
     let signIn: SignInCoordinator
+
+    /// How long an expired session keeps showing its last reading (faded).
+    static let expiredGrace: TimeInterval = 24 * 60 * 60
 
     private let clients: [Provider: any ProviderClient]
     private let cache: SnapshotCache
+    private var rateLimitedUntil: [Provider: Date] = [:]
     private var loopTask: Task<Void, Never>?
     private var wakeTask: Task<Void, Never>?
     private var inFlight: Task<Void, Never>?
@@ -23,11 +30,13 @@ final class QuotaStore {
     init(
         settings: AppSettings = AppSettings(),
         clients: [any ProviderClient] = [GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient()],
-        cache: SnapshotCache = SnapshotCache()
+        cache: SnapshotCache = SnapshotCache(),
+        showsLegacyNotice: Bool = false
     ) {
         self.settings = settings
         self.clients = Dictionary(uniqueKeysWithValues: clients.map { ($0.provider, $0) })
         self.cache = cache
+        self.showsLegacyNotice = showsLegacyNotice
         self.signIn = SignInCoordinator()
         let cached = cache.load()
         for provider in Provider.allCases {
@@ -105,8 +114,14 @@ final class QuotaStore {
 
     private func refreshNow(providers: [Provider]?) async {
         isRefreshing = true
-        lastAttempt = Date()
-        let enabled = (providers ?? Provider.allCases).filter { settings.isEnabled($0) }
+        let now = Date()
+        lastAttempt = now
+        let enabled = (providers ?? Provider.allCases).filter { provider in
+            guard settings.isEnabled(provider) else { return false }
+            // A provider that answered 429 is left alone until its Retry-After passes.
+            if let until = rateLimitedUntil[provider], until > now { return false }
+            return true
+        }
         await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in
             for provider in enabled {
                 guard let client = clients[provider] else { continue }
@@ -127,9 +142,7 @@ final class QuotaStore {
             guard settings.isEnabled(provider) else { return nil }
             let status = statuses[provider] ?? .loading
             switch status {
-            case .signedOut, .expired:
-                return nil
-            case .unreachable(nil):
+            case .signedOut, .notEntitled, .expired(_, nil), .rateLimited(_, nil), .unreachable(nil):
                 return nil
             case .loading:
                 return MenuMeter(
@@ -140,7 +153,8 @@ final class QuotaStore {
                     isStale: false,
                     isPlaceholder: true
                 )
-            case .live(let snapshot), .stale(let snapshot), .unreachable(let snapshot?):
+            case .live(let snapshot), .stale(let snapshot), .unreachable(let snapshot?),
+                 .expired(_, let snapshot?), .rateLimited(_, let snapshot?):
                 return MenuMeter(
                     provider: provider,
                     valueText: Self.percentText(snapshot.usedPercent),
@@ -168,11 +182,31 @@ final class QuotaStore {
             return "Connected · last good reading"
         case .signedOut:
             return "Not signed in"
-        case .expired:
+        case .expired(_, .some):
+            return "Session expired · last good reading"
+        case .expired(_, nil):
             return "Session expired"
+        case .notEntitled:
+            return "Not on this plan"
+        case .rateLimited(let until, _):
+            return "Rate limited · next try \(until.formatted(date: .omitted, time: .shortened))"
         case .unreachable(nil):
             return "Couldn't reach \(provider.displayName)"
         }
+    }
+
+    /// Last successful check for a provider, falling back to when its reading was taken.
+    func lastChecked(_ provider: Provider) -> Date? {
+        checkedAt[provider] ?? statuses[provider]?.snapshot?.fetchedAt
+    }
+
+    func dismissLegacyNotice() {
+        LegacyMigration.dismissNotice()
+        showsLegacyNotice = false
+    }
+
+    func quitLegacyApp() {
+        LegacyMigration.quitLegacyApp()
     }
 
     static func percentText(_ value: Double) -> String {
@@ -200,9 +234,11 @@ final class QuotaStore {
         }
     }
 
-    private func apply(provider: Provider, result: Result<QuotaSnapshot, ProviderError>) {
+    private func apply(provider: Provider, result: Result<QuotaSnapshot, ProviderError>, now: Date = .now) {
         switch result {
         case .success(let snapshot):
+            checkedAt[provider] = snapshot.fetchedAt
+            rateLimitedUntil[provider] = nil
             if case .live(let old) = statuses[provider], Self.usageEqual(old, snapshot) {
                 return
             }
@@ -214,8 +250,14 @@ final class QuotaStore {
             switch error {
             case .signedOut(let hint):
                 next = .signedOut(hint)
+            case .notEntitled(let hint):
+                next = .notEntitled(hint)
             case .expired(let hint):
-                next = .expired(hint)
+                next = .expired(hint, cached: recentReading(cached, provider: provider, now: now))
+            case .rateLimited(let until):
+                let retry = Self.clampedRetry(until, now: now)
+                rateLimitedUntil[provider] = retry
+                next = .rateLimited(until: retry, cached: cached)
             case .unreachable, .parse:
                 if let cached {
                     next = .stale(cached)
@@ -231,12 +273,25 @@ final class QuotaStore {
         }
     }
 
+    private func recentReading(_ cached: QuotaSnapshot?, provider: Provider, now: Date) -> QuotaSnapshot? {
+        guard let cached else { return nil }
+        let checked = checkedAt[provider] ?? cached.fetchedAt
+        return now.timeIntervalSince(checked) < Self.expiredGrace ? cached : nil
+    }
+
+    /// Honors Retry-After, within one minute to six hours.
+    nonisolated static func clampedRetry(_ until: Date?, now: Date) -> Date {
+        let wait = until.map { $0.timeIntervalSince(now) } ?? TokenroomHTTP.defaultRetryAfter
+        return now.addingTimeInterval(min(max(wait, 60), 6 * 60 * 60))
+    }
+
     private static func usageEqual(_ a: QuotaSnapshot, _ b: QuotaSnapshot) -> Bool {
         a.provider == b.provider
             && a.usedPercent == b.usedPercent
             && a.resetsAt == b.resetsAt
             && a.primaryTitle == b.primaryTitle
             && a.windows == b.windows
+            && a.planLabel == b.planLabel
     }
 
     private func persistLiveSnapshots() {

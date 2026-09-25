@@ -48,23 +48,42 @@ struct ClaudeClient: ProviderClient {
 
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
-            let auth = try CredentialReaders.claudeAuth()
-            let token = try await CredentialReaders.refreshClaudeIfNeeded(auth)
-            let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-            let data = try await TokenroomHTTP.get(
-                url,
-                token: token,
-                headers: [
-                    "anthropic-beta": "oauth-2025-04-20",
-                    "User-Agent": CredentialReaders.claudeUserAgent(),
-                    "x-app": "cli",
-                ]
-            )
-            return .success(try ClaudeParser.snapshot(from: data))
+            let auth = try await BlockingIO.run { try CredentialReaders.claudeAuth() }
+            do {
+                return .success(try await usage(with: auth))
+            } catch ProviderError.expired {
+                // Claude Code may have replaced the token since it was cached. Read the
+                // Keychain again once; never refresh the session ourselves.
+                CredentialReaders.invalidateCaches()
+                let fresh = try await BlockingIO.run { try CredentialReaders.claudeAuth() }
+                guard fresh.accessToken != auth.accessToken else {
+                    throw ProviderError.expired(Provider.claude.expiredHint)
+                }
+                return .success(try await usage(with: fresh))
+            }
         } catch let error as ProviderError {
             return .failure(error)
         } catch {
             return .failure(.unreachable)
         }
+    }
+
+    private func usage(with auth: CredentialReaders.ClaudeAuth) async throws -> QuotaSnapshot {
+        guard !auth.accessToken.isEmpty, !auth.isExpired else {
+            throw ProviderError.expired(Provider.claude.expiredHint)
+        }
+        let userAgent = await BlockingIO.run { CredentialReaders.claudeUserAgent() }
+        let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+        let data = try await TokenroomHTTP.get(
+            url,
+            token: auth.accessToken,
+            headers: [
+                "anthropic-beta": "oauth-2025-04-20",
+                "User-Agent": userAgent,
+                "x-app": "cli",
+            ],
+            provider: .claude
+        )
+        return try ClaudeParser.snapshot(from: data)
     }
 }

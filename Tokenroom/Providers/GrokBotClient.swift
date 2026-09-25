@@ -4,41 +4,30 @@ enum GrokBotParser {
     static func snapshot(from data: Data, fetchedAt: Date = .now) throws -> QuotaSnapshot {
         let root = try JSONFlex.object(from: data)
         if let included = root["hasNonZeroIncludedLimit"] as? Bool, included == false {
-            throw ProviderError.signedOut("Grok Bot isn't on this Cursor plan.")
+            throw ProviderError.notEntitled("Grok Bot isn't on this Cursor plan.")
         }
         guard let usedRaw = JSONFlex.number(root["usagePercent"]) else {
             throw ProviderError.parse
         }
         let used = JSONFlex.clampPercent(usedRaw)
         let resetsAt = JSONFlex.date(root["nextResetTimestampUtc"])
-        let plan = JSONFlex.string(root["grokPlanLabel"])
-        var windows = [
-            QuotaWindow(
-                id: "weekly",
-                kind: .weekly,
-                title: "Weekly",
-                usedPercent: used,
-                resetsAt: resetsAt
-            ),
-        ]
-        if let plan, !plan.isEmpty {
-            windows.append(
-                QuotaWindow(
-                    id: "plan",
-                    kind: .pool,
-                    title: plan,
-                    usedPercent: used,
-                    resetsAt: nil
-                )
-            )
-        }
+        let plan = JSONFlex.string(root["grokPlanLabel"]).flatMap { $0.isEmpty ? nil : $0 }
         return QuotaSnapshot(
             provider: .grokBot,
             usedPercent: used,
             resetsAt: resetsAt,
             fetchedAt: fetchedAt,
             primaryTitle: "Weekly",
-            windows: windows
+            windows: [
+                QuotaWindow(
+                    id: "weekly",
+                    kind: .weekly,
+                    title: "Weekly",
+                    usedPercent: used,
+                    resetsAt: resetsAt
+                ),
+            ],
+            planLabel: plan
         )
     }
 }
@@ -48,7 +37,7 @@ struct GrokBotClient: ProviderClient {
 
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
-            let token = try CredentialReaders.cursorAccessToken()
+            let token = try await BlockingIO.run { try CredentialReaders.cursorAccessToken() }
             let url = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus")!
             let data = try await TokenroomHTTP.post(
                 url,
