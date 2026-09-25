@@ -57,6 +57,15 @@ final class ProviderUpgradeTests: XCTestCase {
         XCTAssertEqual(AmountFormat.text(12.4, unit: "usd", locale: Locale(identifier: "en_US")), "$12.40")
     }
 
+    // MARK: Grok
+
+    func testGrokPlanLabelFromSettings() {
+        let settings = Data(#"{"subscription_tier_display":" SuperGrok Heavy ","default_model":"grok-4.7","announcements":[]}"#.utf8)
+        XCTAssertEqual(GrokParser.planLabel(fromSettings: settings), "SuperGrok Heavy")
+        XCTAssertNil(GrokParser.planLabel(fromSettings: Data(#"{"subscription_tier_display":""}"#.utf8)))
+        XCTAssertNil(GrokParser.planLabel(fromSettings: Data("not json".utf8)))
+    }
+
     // MARK: Fixtures
 
     /// Fixtures must stay anonymous: no emails, API keys, JWTs, or GitHub tokens.

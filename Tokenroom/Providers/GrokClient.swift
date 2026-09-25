@@ -1,6 +1,16 @@
 import Foundation
+import os
 
 enum GrokParser {
+    /// Plan name from `/v1/settings`; the rest of that response is ignored.
+    static func planLabel(fromSettings data: Data) -> String? {
+        guard let root = try? JSONFlex.object(from: data),
+              let label = JSONFlex.string(root["subscription_tier_display"])?.trimmingCharacters(in: .whitespaces),
+              !label.isEmpty
+        else { return nil }
+        return label
+    }
+
     static func snapshot(from data: Data, fetchedAt: Date = .now) throws -> QuotaSnapshot {
         let root = try JSONFlex.object(from: data)
         let config = JSONFlex.dictionary(root["config"]) ?? root
@@ -64,6 +74,10 @@ enum GrokParser {
 struct GrokClient: ProviderClient {
     var provider: Provider { .grok }
 
+    /// The plan name rarely changes; look it up at most every six hours.
+    private static let planCache = OSAllocatedUnfairLock<(label: String?, at: Date)?>(initialState: nil)
+    private static let planTTL: TimeInterval = 6 * 3_600
+
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
         do {
             let auth = try await BlockingIO.run { try CredentialReaders.grokAuth() }
@@ -74,11 +88,31 @@ struct GrokClient: ProviderClient {
                 headers["x-userid"] = userID
             }
             let data = try await TokenroomHTTP.get(url, token: token, headers: headers, provider: .grok)
-            return .success(try GrokParser.snapshot(from: data))
+            var snapshot = try GrokParser.snapshot(from: data)
+            snapshot.planLabel = await planLabel(token: token, headers: headers)
+            return .success(snapshot)
         } catch let error as ProviderError {
             return .failure(error)
         } catch {
             return .failure(.unreachable)
         }
+    }
+
+    /// `subscription_tier_display` from the CLI's settings. Best effort: never fails the reading.
+    private func planLabel(token: String, headers: [String: String]) async -> String? {
+        if let cached = Self.planCache.withLock({ $0 }), Date().timeIntervalSince(cached.at) < Self.planTTL {
+            return cached.label
+        }
+        guard let data = try? await TokenroomHTTP.get(
+            URL(string: "https://cli-chat-proxy.grok.com/v1/settings")!,
+            token: token,
+            headers: headers,
+            provider: .grok
+        ) else {
+            return Self.planCache.withLock { $0?.label }
+        }
+        let label = GrokParser.planLabel(fromSettings: data)
+        Self.planCache.withLock { $0 = (label, Date()) }
+        return label
     }
 }

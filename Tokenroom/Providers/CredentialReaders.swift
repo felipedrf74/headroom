@@ -335,22 +335,29 @@ enum CredentialReaders {
             return cached.token
         }
         let path = cursorDatabaseURL.path
-        guard FileManager.default.fileExists(atPath: path) else {
-            throw ProviderError.signedOut(Provider.cursor.signInHint)
-        }
-        if let token = sqliteCursorToken(at: path) {
-            cursorCache.withLock { $0 = (token, Date()) }
-            return token
-        }
-        if let copy = copyCursorDatabase() {
-            defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
-            if let token = sqliteCursorToken(at: copy.path) {
+        if FileManager.default.fileExists(atPath: path) {
+            if let token = sqliteCursorToken(at: path) {
                 cursorCache.withLock { $0 = (token, Date()) }
                 return token
             }
+            // A busy database can refuse a read-only open; a copy can still be read.
+            if let copy = copyCursorDatabase() {
+                defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
+                if let token = sqliteCursorToken(at: copy.path) {
+                    cursorCache.withLock { $0 = (token, Date()) }
+                    return token
+                }
+            }
+        }
+        // Cursor 3.9 and later keep the token in the Keychain instead.
+        if let token = keychainPassword(service: cursorKeychainService, promptAllowed: false), !token.isEmpty {
+            cursorCache.withLock { $0 = (token, Date()) }
+            return token
         }
         throw ProviderError.signedOut(Provider.cursor.signInHint)
     }
+
+    static let cursorKeychainService = "cursor-access-token"
 
     private static func cursorSessionStamp() -> String? {
         let db = fileStamp(cursorDatabaseURL)
@@ -411,13 +418,18 @@ enum CredentialReaders {
         }
     }
 
-    private static func keychainPassword(service: String, account: String? = nil) -> String? {
+    /// - Parameter promptAllowed: false fails quietly instead of asking for Keychain access,
+    ///   for items another app owns that are polled every refresh.
+    private static func keychainPassword(service: String, account: String? = nil, promptAllowed: Bool = true) -> String? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
+        if !promptAllowed {
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        }
         if let account {
             query[kSecAttrAccount as String] = account
         }
