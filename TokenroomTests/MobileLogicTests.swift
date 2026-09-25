@@ -158,7 +158,7 @@ final class MobileLogicTests: XCTestCase {
     // MARK: Deep links and text
 
     func testDeepLinksRoundTrip() {
-        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .settings, .keys] {
+        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .news, .settings, .keys] {
             XCTAssertEqual(DeepLink(link.url), link)
         }
         XCTAssertNil(DeepLink(URL(string: "https://example.com/provider/claude")!))

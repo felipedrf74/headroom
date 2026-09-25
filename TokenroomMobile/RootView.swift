@@ -2,11 +2,13 @@ import SwiftUI
 
 enum AppTab: Hashable {
     case usage
+    case news
     case settings
 }
 
 struct RootView: View {
     @Bindable var store: MobileStore
+    @Bindable var news: NewsStore
     @State private var showsOnboarding = false
     @State private var tab: AppTab = .usage
     @State private var usagePath: [String] = []
@@ -28,6 +30,9 @@ struct RootView: View {
         TabView(selection: $tab) {
             Tab("Usage", systemImage: "gauge.with.dots.needle.50percent", value: .usage) {
                 UsageView(store: store, path: $usagePath)
+            }
+            Tab("News", systemImage: "newspaper", value: .news) {
+                NewsView(news: news, store: store)
             }
             Tab("Settings", systemImage: "gearshape", value: .settings) {
                 MobileSettingsView(store: store, path: $settingsPath)
@@ -55,6 +60,8 @@ struct RootView: View {
         case .provider(let id):
             tab = .usage
             usagePath = [id]
+        case .news:
+            tab = .news
         case .settings:
             tab = .settings
             settingsPath = []

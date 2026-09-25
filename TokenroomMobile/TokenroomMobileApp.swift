@@ -5,11 +5,12 @@ import UserNotifications
 struct TokenroomMobileApp: App {
     @UIApplicationDelegateAdaptor(MobileAppDelegate.self) private var appDelegate
     @State private var store = MobileStore()
+    @State private var news = NewsStore()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            RootView(store: store)
+            RootView(store: store, news: news)
                 .task {
                     appDelegate.store = store
                     await store.refresh(force: true)
@@ -33,6 +34,7 @@ struct TokenroomMobileApp: App {
         }
         .backgroundTask(.appRefresh(MobileStore.backgroundTaskID)) {
             await store.backgroundRefresh()
+            await news.refresh(preferences: store.alertPreferences)
         }
     }
 }

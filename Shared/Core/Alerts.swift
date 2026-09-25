@@ -31,6 +31,8 @@ struct AlertPreferences: Codable, Equatable, Sendable {
     var thresholds: [Int] = [80, 95]
     var resets = true
     var banked = true
+    /// New models from the labs the News tab follows (iPhone only).
+    var newModels = true
     var quietHours = true
     var quietStartHour = 22
     var quietEndHour = 8
@@ -38,6 +40,30 @@ struct AlertPreferences: Codable, Equatable, Sendable {
     var timeZoneID = TimeZone.current.identifier
 
     static let supportedThresholds = [80, 95]
+
+    init() {}
+
+    /// Missing keys keep their defaults, so preferences saved by an older build still read.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AlertPreferences()
+        thresholds = try container.decodeIfPresent([Int].self, forKey: .thresholds) ?? defaults.thresholds
+        resets = try container.decodeIfPresent(Bool.self, forKey: .resets) ?? defaults.resets
+        banked = try container.decodeIfPresent(Bool.self, forKey: .banked) ?? defaults.banked
+        newModels = try container.decodeIfPresent(Bool.self, forKey: .newModels) ?? defaults.newModels
+        quietHours = try container.decodeIfPresent(Bool.self, forKey: .quietHours) ?? defaults.quietHours
+        quietStartHour = try container.decodeIfPresent(Int.self, forKey: .quietStartHour) ?? defaults.quietStartHour
+        quietEndHour = try container.decodeIfPresent(Int.self, forKey: .quietEndHour) ?? defaults.quietEndHour
+        timeZoneID = try container.decodeIfPresent(String.self, forKey: .timeZoneID) ?? defaults.timeZoneID
+    }
+
+    /// When quiet hours next end after `date`, for holding back a notification that can wait.
+    func quietEnd(after date: Date) -> Date? {
+        guard isQuiet(at: date) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: timeZoneID) ?? .current
+        return calendar.nextDate(after: date, matching: DateComponents(hour: quietEndHour, minute: 0), matchingPolicy: .nextTime)
+    }
 
     /// Whether `date` falls in quiet hours, which can run past midnight (22:00–08:00).
     func isQuiet(at date: Date) -> Bool {
