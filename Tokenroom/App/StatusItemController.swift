@@ -9,6 +9,7 @@ private final class PassthroughHostingView<Content: View>: NSHostingView<Content
 final class StatusItemController: NSObject {
     private let store: QuotaStore
     private let onSettings: () -> Void
+    private let onNews: (NewsSection) -> Void
     private let item: NSStatusItem
     private let popover = NSPopover()
     private var hosting: PassthroughHostingView<MenuBarLabel>?
@@ -18,9 +19,10 @@ final class StatusItemController: NSObject {
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
 
-    init(store: QuotaStore, onSettings: @escaping () -> Void) {
+    init(store: QuotaStore, onSettings: @escaping () -> Void, onNews: @escaping (NewsSection) -> Void) {
         self.store = store
         self.onSettings = onSettings
+        self.onNews = onNews
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         item.autosaveName = "Tokenroom"
@@ -30,6 +32,9 @@ final class StatusItemController: NSObject {
             rootView: PopoverView(store: store, onSettings: { [weak self] in
                 self?.closePopover()
                 onSettings()
+            }, onNews: { [weak self] section in
+                self?.closePopover()
+                onNews(section)
             })
         )
         content.sizingOptions = [.preferredContentSize]

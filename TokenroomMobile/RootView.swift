@@ -29,11 +29,18 @@ struct RootView: View {
     private var tabs: some View {
         TabView(selection: $tab) {
             Tab("Usage", systemImage: "gauge.with.dots.needle.50percent", value: .usage) {
-                UsageView(store: store, path: $usagePath)
+                UsageView(store: store, news: news, path: $usagePath, openNews: { section in
+                    UserDefaults.standard.set(section.rawValue, forKey: "newsSection")
+                    tab = .news
+                }, openAlerts: {
+                    tab = .settings
+                    settingsPath = [.alerts]
+                })
             }
             Tab("News", systemImage: "newspaper", value: .news) {
                 NewsView(news: news, store: store)
             }
+            .badge(tab == .news ? 0 : news.unseenCount)
             Tab("Settings", systemImage: "gearshape", value: .settings) {
                 MobileSettingsView(store: store, path: $settingsPath)
             }
@@ -79,6 +86,9 @@ struct RootView: View {
         case .keys:
             tab = .settings
             settingsPath = [.keys]
+        case .alerts:
+            tab = .settings
+            settingsPath = [.alerts]
         }
     }
 }

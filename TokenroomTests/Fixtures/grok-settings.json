@@ -1,0 +1,13 @@
+{
+  "subscription_tier": "SUBSCRIPTION_TIER_SUPER_GROK_HEAVY",
+  "subscription_tier_display": " SuperGrok Heavy ",
+  "default_model": "grok-4.7",
+  "available_models": [
+    { "id": "grok-4.7", "display_name": "Grok 4.7", "context_window": 256000 },
+    { "id": "grok-code-fast-2", "display_name": "Grok Code Fast 2", "context_window": 256000 }
+  ],
+  "features": { "web_search": true, "image_input": true, "background_agents": false },
+  "announcements": [],
+  "telemetry_enabled": false,
+  "updated_at": "2026-09-25T11:58:00Z"
+}

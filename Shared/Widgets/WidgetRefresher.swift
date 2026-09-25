@@ -39,12 +39,24 @@ enum WidgetRefresher {
         let (contents, fresh) = await (relayRead, keyRead)
         guard contents != nil || !fresh.isEmpty else { return nil }
 
-        // This iPhone's providers: what was just read, else its last relayed or cached reading.
+        // This iPhone's providers: what was just read, else the newer of its last relayed and
+        // cached readings.
         let ownRecord = contents?.sources.first { $0.id == ownID }?.envelope
         let previousOwn = previous?.items.filter { $0.source == localLabel }.map(\.provider) ?? []
+        // As in the app: only providers that still have a key, and readings up to a week old.
+        let keyed = (defaults.array(forKey: "keyedProviders") as? [String]).map(Set.init)
         var own = fresh
-        for provider in (ownRecord?.providers ?? []) + previousOwn where !own.contains(where: { $0.id == provider.id }) {
-            own.append(provider)
+        for provider in (ownRecord?.providers ?? []) + previousOwn where !fresh.contains(where: { $0.id == provider.id }) {
+            guard keyed?.contains(provider.id) ?? true,
+                  let time = Self.readingTime(provider), now.timeIntervalSince(time) < RelayMerge.maxSourceAge
+            else { continue }
+            if let index = own.firstIndex(where: { $0.id == provider.id }) {
+                if Self.readingTime(provider) ?? .distantPast > Self.readingTime(own[index]) ?? .distantPast {
+                    own[index] = provider
+                }
+            } else {
+                own.append(provider)
+            }
         }
 
         var sources = (contents?.sources ?? []).compactMap { source -> RelayMerge.Source? in
@@ -52,6 +64,29 @@ enum WidgetRefresher {
             return RelayMerge.Source(id: source.id, label: source.label, envelope: envelope)
         }
         var histories = contents?.histories ?? [:]
+        if contents == nil, let previous {
+            // iCloud didn't answer in time: the other devices' readings from last time stay,
+            // rather than leaving only this iPhone's.
+            let others = Dictionary(grouping: previous.items.filter { $0.source != localLabel }, by: \.source)
+            for (label, items) in others {
+                let id = "previous-" + label
+                sources.append(RelayMerge.Source(
+                    id: id,
+                    label: label,
+                    // Dated by their own checks, so they age out if iCloud stays away.
+                    envelope: RelayEnvelope(producer: "cache", appVersion: TokenroomIdentity.version,
+                                            checkedAt: items.compactMap { Self.readingTime($0.provider) }.max() ?? previous.savedAt,
+                                            providers: items.map(\.provider))
+                ))
+                var series: [String: UsageHistory] = [:]
+                for item in items {
+                    for (window, week) in item.history {
+                        series[RelayHistory.key(provider: item.id, window: window)] = week
+                    }
+                }
+                histories[id] = RelayHistory(series: series)
+            }
+        }
         if let ownID, !own.isEmpty {
             sources.append(RelayMerge.Source(
                 id: ownID,
@@ -68,6 +103,10 @@ enum WidgetRefresher {
         return cache
     }
 
+    private static func readingTime(_ provider: RelayProvider) -> Date? {
+        provider.checkedAt ?? provider.fetchedAt
+    }
+
     private static func readRelay() async -> CloudRelay.Contents? {
         guard let container = RelayAvailability.containerIdentifier else { return nil }
         let relay = CloudRelay(containerIdentifier: container)
@@ -75,24 +114,37 @@ enum WidgetRefresher {
         return try? await relay.contents()
     }
 
-    /// Providers read with this iPhone's keys. Ones that failed are left out, so an older
-    /// reading stands in for them.
+    /// Providers read with this iPhone's keys. Ones that failed, or that are resting between
+    /// calls (spacing, a 429), are left out, so an older reading stands in for them.
     private static func readKeys(defaults: UserDefaults, now: Date) async -> [RelayProvider] {
         let keys = APIKeyStore(accessGroup: AppGroup.keychainGroup)
+        let gate = KeyFetchGate(defaults: defaults)
         let providers = await BlockingIO.run {
-            Provider.allCases.filter { $0.usesAPIKey && keys.hasKey(for: $0) }
-        }
+            Provider.allCases.filter { $0.readsWithKey && keys.hasKey(for: $0) }
+        }.filter { !gate.isResting($0, now: now) }
         guard !providers.isEmpty else { return [] }
         let budgets = defaults.dictionary(forKey: "budgets") as? [String: Double] ?? [:]
-        let snapshots = await withTaskGroup(of: QuotaSnapshot?.self) { group in
+        for provider in providers {
+            gate.recordAttempt(provider, at: now)
+        }
+        let snapshots = await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in
             for provider in providers {
                 group.addTask {
-                    try? await APIKeyClient(provider: provider, keys: keys).fetch().get()
+                    // A second under the widget's own limit, so a slow provider doesn't cost the rest.
+                    await (provider, APIKeyClient(provider: provider, keys: keys).fetchWithinBudget(budget - 1))
                 }
             }
             var snapshots: [QuotaSnapshot] = []
-            for await snapshot in group {
-                if let snapshot { snapshots.append(snapshot) }
+            for await (provider, result) in group {
+                switch result {
+                case .success(let snapshot):
+                    gate.block(provider, until: nil)
+                    snapshots.append(snapshot)
+                case .failure(.rateLimited(let until)):
+                    gate.block(provider, until: ProviderStatus.clampedRetry(until, now: now))
+                case .failure:
+                    break
+                }
             }
             return snapshots
         }

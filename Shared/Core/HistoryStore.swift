@@ -33,7 +33,12 @@ final class HistoryStore {
         for window in snapshot.windows {
             let key = RelayHistory.key(provider: snapshot.provider.rawValue, window: window.id)
             var week = weeks[key] ?? UsageHistory(endingAt: snapshot.fetchedAt)
-            if week.record(window.usedPercent, at: snapshot.fetchedAt) || weeks[key] == nil {
+            var changed = week.record(window.usedPercent, at: snapshot.fetchedAt)
+            if let amount = window.amount, let remaining = amount.remainingOrComputed, amount.unit == "usd" || amount.unit == "cny" {
+                changed = week.recordAmount(remaining, at: snapshot.fetchedAt) || changed
+            }
+            changed = week.recordResetTime(window.resetsAt, at: snapshot.fetchedAt) || changed
+            if changed || weeks[key] == nil {
                 weeks[key] = week
                 dirty = true
             }
@@ -55,6 +60,16 @@ final class HistoryStore {
             return recent
         }
         return weeks[key]?.points ?? []
+    }
+
+    /// One provider's weeks, keyed by window ID.
+    func weeks(for provider: Provider) -> [String: UsageHistory] {
+        let prefix = RelayHistory.key(provider: provider.rawValue, window: "")
+        var result: [String: UsageHistory] = [:]
+        for (key, week) in weeks where key.hasPrefix(prefix) {
+            result[String(key.dropFirst(prefix.count))] = week
+        }
+        return result
     }
 
     /// History to relay, limited to the given providers.

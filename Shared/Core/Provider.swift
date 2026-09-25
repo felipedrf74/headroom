@@ -72,10 +72,19 @@ struct ProviderDescriptor: Sendable {
     var minimumInterval: TimeInterval = 0
     /// For providers read with a pasted API key.
     var key: KeySpec? = nil
+    /// A documented API that reads the same usage with a key, for where the local login can't
+    /// be used: the iPhone, or a Mac without the tool's login (Copilot's billing API).
+    var fallbackKey: KeySpec? = nil
 
     var access: Access {
         guard let key else { return .localLogin }
         return key.isCodingPlan ? .codingPlanKey : .pastedKey
+    }
+
+    /// Read from the endpoint the provider's own app or CLI uses, not a documented API. Works
+    /// today, may change without notice; the Mac says so.
+    var isUnofficial: Bool {
+        access == .localLogin
     }
 }
 
@@ -86,8 +95,13 @@ struct KeySpec: Sendable {
     var createURL: URL
     /// Start of a typical key, shown as a hint.
     var prefixHint = ""
-    /// Accounts in separate regions, e.g. Moonshot's global and China platforms.
+    /// Accounts in separate regions, e.g. Moonshot's global and China platforms, or other
+    /// choices saved with the key (Copilot's plan).
     var regions: [String] = []
+    /// What the choice is called in the key form.
+    var choiceLabel = "Account"
+    /// What the key needs, shown in the key form, e.g. a token permission.
+    var note: String? = nil
     /// Org-wide admin or management keys get an extra warning.
     var isAdmin = false
     /// A subscription's key that a coding tool on the Mac may already hold (Claude Code
@@ -173,7 +187,15 @@ extension Provider {
                 monogram: "GH",
                 tintHex: "#24292F",
                 signInHint: "Sign in with gh auth login, or in a Copilot editor extension, to see usage.",
-                expiredHint: "GitHub session expired. Run gh auth login again."
+                expiredHint: "GitHub session expired. Run gh auth login again.",
+                fallbackKey: KeySpec(
+                    label: "fine-grained token",
+                    createURL: URL(string: "https://github.com/settings/personal-access-tokens/new")!,
+                    prefixHint: "github_pat_",
+                    regions: CopilotBilling.plans.map(\.name),
+                    choiceLabel: "Plan",
+                    note: "Give the token the Plan (read) account permission. Only Copilot you pay for yourself shows up; GitHub doesn't report the plan, so pick it here."
+                )
             )
         case .antigravity:
             ProviderDescriptor(
@@ -334,6 +356,10 @@ extension Provider {
     var displayName: String { descriptor.displayName }
     var key: KeySpec? { descriptor.key }
     var usesAPIKey: Bool { descriptor.key != nil }
+    /// The key form for this provider: its own key, or a documented fallback (Copilot).
+    var keySpec: KeySpec? { descriptor.key ?? descriptor.fallbackKey }
+    /// Readable on the iPhone with a key pasted there.
+    var readsWithKey: Bool { keySpec != nil }
     var access: ProviderDescriptor.Access { descriptor.access }
     var shortName: String { descriptor.shortName }
     var letter: String { descriptor.letter }
@@ -346,4 +372,5 @@ extension Provider {
     var signInHint: String { descriptor.signInHint }
     var expiredHint: String { descriptor.expiredHint }
     var minimumInterval: TimeInterval { descriptor.minimumInterval }
+    var isUnofficial: Bool { descriptor.isUnofficial }
 }

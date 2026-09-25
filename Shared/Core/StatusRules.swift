@@ -62,7 +62,8 @@ extension RelayProvider {
             primaryWindowID: snapshot?.windows.first?.id,
             windows: snapshot?.windows.map(RelayWindow.init) ?? [],
             banked: snapshot?.banked,
-            extra: snapshot?.extra
+            extra: snapshot?.extra,
+            category: provider.category.rawValue
         )
     }
 

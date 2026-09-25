@@ -1,0 +1,45 @@
+{
+  "timePeriod": { "year": 2026, "month": 9 },
+  "user": "octocat-placeholder",
+  "usageItems": [
+    {
+      "product": "Copilot",
+      "sku": "Copilot AI Credit",
+      "model": "Claude Sonnet 4.5",
+      "unitType": "credits",
+      "pricePerUnit": 0.01,
+      "grossQuantity": 412.5,
+      "grossAmount": 4.125,
+      "discountQuantity": 412.5,
+      "discountAmount": 4.125,
+      "netQuantity": 0,
+      "netAmount": 0
+    },
+    {
+      "product": "Copilot",
+      "sku": "Copilot AI Credit",
+      "model": "GPT-5.1",
+      "unitType": "credits",
+      "pricePerUnit": 0.01,
+      "grossQuantity": 187.25,
+      "grossAmount": 1.8725,
+      "discountQuantity": 187.25,
+      "discountAmount": 1.8725,
+      "netQuantity": 0,
+      "netAmount": 0
+    },
+    {
+      "product": "Copilot",
+      "sku": "Copilot AI Credit",
+      "model": "Code review",
+      "unitType": "credits",
+      "pricePerUnit": 0.01,
+      "grossQuantity": 0.75,
+      "grossAmount": 0.0075,
+      "discountQuantity": 0,
+      "discountAmount": 0,
+      "netQuantity": 0.75,
+      "netAmount": 0.0075
+    }
+  ]
+}

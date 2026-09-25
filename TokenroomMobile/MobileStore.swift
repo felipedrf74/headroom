@@ -50,6 +50,9 @@ final class MobileStore {
         static let alertPreferences = "alertPreferences"
         static let alertPreferencesShared = "alertPreferencesShared"
         static let prunedAt = "eventsPrunedAt"
+        static let alertsFiltered = "alertSubscriptionFiltered"
+        static let unclaimedAlerts = "unclaimedAlerts"
+        static let keyedProviders = "keyedProviders"
     }
 
     static let localLabel = "This iPhone"
@@ -85,17 +88,33 @@ final class MobileStore {
         didSet { defaults.set(hasOnboarded, forKey: Keys.onboarded) }
     }
 
-    /// Which alerts to send, and quiet hours. Shared through iCloud so Macs follow them too.
+    /// Which alerts to send, and quiet hours. Shared through iCloud with Macs, which can change
+    /// them too; the newer copy wins.
     var alertPreferences: AlertPreferences {
         didSet {
-            guard alertPreferences != oldValue else { return }
+            // @Observable moves this observer to the backing storage, so stamping the change
+            // below comes back through here; the flag ends that second pass at once.
+            guard alertPreferences != oldValue, !stampingPreferences else { return }
+            if !adoptingPreferences {
+                stampingPreferences = true
+                alertPreferences.touch()
+                stampingPreferences = false
+            }
             if let data = try? JSONEncoder().encode(alertPreferences) {
                 defaults.set(data, forKey: Keys.alertPreferences)
             }
+            guard !adoptingPreferences else { return }
             defaults.set(false, forKey: Keys.alertPreferencesShared)
-            Task { await shareAlertPreferences() }
+            Task {
+                await shareAlertPreferences()
+                await prepareNotifications()
+            }
         }
     }
+    /// Set while taking a newer copy from iCloud, so it isn't stamped and sent back.
+    @ObservationIgnored private var adoptingPreferences = false
+    /// Set while stamping a change made on this iPhone with its time.
+    @ObservationIgnored private var stampingPreferences = false
 
     let keys: APIKeyStore
     let sourceID: String
@@ -107,8 +126,20 @@ final class MobileStore {
     private var lastHistoryHour: Date?
     private var lastCacheHash: Int?
     private var rateLimitedUntil: [Provider: Date] = [:]
+    /// When each key provider was last called, shared with the widgets.
+    private let keyGate: KeyFetchGate
+    /// iCloud asked to wait (rate limit, busy); reads and writes pause until then.
+    private var relayRetryAt: Date?
     private var alertLedger: AlertLedger
     private var relayEvents: [(id: String, createdAt: Date?)] = []
+    /// This iPhone's record as iCloud last had it. With the App Group cache, which widgets also
+    /// write, it stands in for providers this launch hasn't read (keys not read yet, or resting).
+    @ObservationIgnored private var ownRecord: RelayEnvelope?
+    /// Whether this launch has read its keys. Until then it doesn't publish: a silent push
+    /// launches the app without reading them, and its record would lose those providers.
+    @ObservationIgnored private var keysRead = false
+    /// Whether the push subscriptions are saved for the current choices; retried each refresh.
+    @ObservationIgnored private var subscriptionsCurrent = false
     private let directory: URL?
     private let logger = Logger(subsystem: TokenroomIdentity.bundleID, category: "store")
 
@@ -120,6 +151,7 @@ final class MobileStore {
     ) {
         self.defaults = defaults
         self.keys = keys
+        keyGate = KeyFetchGate(defaults: defaults)
         if let existing = defaults.string(forKey: Keys.sourceID) {
             sourceID = existing
         } else {
@@ -141,6 +173,9 @@ final class MobileStore {
         if let sample = arguments[Keys.sampleMode] as? String { sampleMode = sample == "YES" }
         if let onboarded = arguments[Keys.onboarded] as? String { hasOnboarded = onboarded == "YES" }
         #endif
+        // Which providers have keys, as the last launch found; read again, off the main thread,
+        // on the first refresh that includes keys.
+        keyedProviders = (defaults.array(forKey: Keys.keyedProviders) as? [String] ?? []).compactMap(Provider.init(rawValue:))
         showCachedReadings()
     }
 
@@ -165,6 +200,10 @@ final class MobileStore {
         await sendAlerts(now: now)
         await pruneEvents(now: now)
         history.saveIfNeeded()
+        // Last, so readings show first; claims meanwhile go by the last launch's answer.
+        if relayPhase == .ready, !subscriptionsCurrent {
+            await prepareNotifications()
+        }
     }
 
     private func readRelay() async {
@@ -175,36 +214,73 @@ final class MobileStore {
         if relaySources.isEmpty {
             relayPhase = .loading
         }
+        if let relayRetryAt, relayRetryAt > .now { return }
         do {
             guard try await relay.accountStatus() == .available else {
                 relayPhase = .noAccount
                 return
             }
             let contents = try await relay.contents()
+            ownRecord = contents.sources.first { $0.id == sourceID }?.envelope
             relaySources = contents.sources.filter { $0.id != sourceID }
             relayHistories = contents.histories
             relayEvents = contents.events
             relayPhase = .ready
+            relayRetryAt = nil
+            adoptPreferences(contents.alertPreferences)
         } catch {
             logger.error("relay read failed: \(String(describing: error), privacy: .public)")
-            relayPhase = .failed("Couldn't reach iCloud.")
+            handleRelayError(error)
+        }
+    }
+
+    /// Takes the shared alert preferences when a Mac changed them after this iPhone did.
+    private func adoptPreferences(_ remote: AlertPreferences?) {
+        guard let remote, AlertPreferences.newest(remote, alertPreferences) == remote, remote != alertPreferences else { return }
+        adoptingPreferences = true
+        alertPreferences = remote
+        adoptingPreferences = false
+        defaults.set(true, forKey: Keys.alertPreferencesShared)
+        Task { await prepareNotifications() }
+    }
+
+    private func handleRelayError(_ error: Error, now: Date = .now) {
+        switch RelayErrorPolicy.outcome(for: error, defaultRetry: RelayPublishPolicy.minimumInterval) {
+        case .noAccount:
+            relayPhase = .noAccount
+        case .paused(let message), .failed(let message):
+            relayPhase = .failed(message)
+        case .retry(let after, let message):
+            relayRetryAt = now.addingTimeInterval(after)
+            relayPhase = .failed(message)
+        case .unavailable:
+            relayPhase = .unavailable
+        case .cancelled:
+            break
         }
     }
 
     private func readKeys(force: Bool, now: Date) async {
         let keys = self.keys
         let providers = await BlockingIO.run {
-            Provider.allCases.filter { $0.usesAPIKey && keys.hasKey(for: $0) }
+            Provider.allCases.filter { $0.readsWithKey && keys.hasKey(for: $0) }
         }
         keyedProviders = providers
+        keysRead = true
+        defaults.set(providers.map(\.rawValue), forKey: Keys.keyedProviders)
         for provider in localStatuses.keys where !providers.contains(provider) {
             localStatuses[provider] = nil
             localCheckedAt[provider] = nil
         }
+        // Shared with the widgets: Anthropic's cost report allows a call every 15 minutes,
+        // pull to refresh or not, and a 429 holds every caller off.
+        let gate = keyGate
         let due = providers.filter { provider in
             if let until = rateLimitedUntil[provider], until > now { return false }
-            if !force, let last = localCheckedAt[provider], now.timeIntervalSince(last) < provider.minimumInterval { return false }
-            return true
+            return !gate.isResting(provider, now: now)
+        }
+        for provider in due {
+            gate.recordAttempt(provider, at: now)
         }
         await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in
             for provider in due {
@@ -212,26 +288,12 @@ final class MobileStore {
                     localStatuses[provider] = .loading
                 }
                 group.addTask {
-                    await (provider, Self.fetch(APIKeyClient(provider: provider, keys: keys)))
+                    await (provider, APIKeyClient(provider: provider, keys: keys).fetchWithinBudget())
                 }
             }
             for await (provider, result) in group {
                 apply(provider, result: result, now: now)
             }
-        }
-    }
-
-    /// One provider's check, given up on after its budget.
-    private nonisolated static func fetch(_ client: APIKeyClient) async -> Result<QuotaSnapshot, ProviderError> {
-        await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
-            group.addTask { await client.fetch() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(client.fetchBudget * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first ?? .failure(.unreachable)
         }
     }
 
@@ -242,11 +304,13 @@ final class MobileStore {
             localStatuses[provider] = .live(snapshot)
             localCheckedAt[provider] = snapshot.fetchedAt
             rateLimitedUntil[provider] = nil
+            keyGate.block(provider, until: nil)
             history.record(snapshot)
         case .failure(let error):
             let next = ProviderStatus.failure(error, cached: localStatuses[provider]?.snapshot, lastChecked: localCheckedAt[provider], now: now)
             if case .rateLimited(let until, _) = next {
                 rateLimitedUntil[provider] = until
+                keyGate.block(provider, until: until)
             }
             localStatuses[provider] = next
         }
@@ -277,8 +341,9 @@ final class MobileStore {
             source.envelope.map { RelayMerge.Source(id: source.id, label: source.label, envelope: $0) }
         }
         var histories = relayHistories
-        if !localStatuses.isEmpty {
-            sources.append(RelayMerge.Source(id: sourceID, label: Self.localLabel, envelope: localEnvelope(now: now)))
+        let own = localEnvelope(now: now)
+        if !own.providers.isEmpty {
+            sources.append(RelayMerge.Source(id: sourceID, label: Self.localLabel, envelope: own))
             histories[sourceID] = RelayHistory(series: history.weeks)
         }
         let output = ReadingAssembler.assemble(sources: sources, histories: histories, now: now)
@@ -331,20 +396,59 @@ final class MobileStore {
 
     // MARK: This iPhone as a source
 
+    /// Readings older than this don't stand in for a provider (the merge's own limit).
+    private static let standInLimit = RelayMerge.maxSourceAge
+
+    /// This iPhone's providers, each at its newest reading: what this launch read with its keys,
+    /// or what its iCloud record or the App Group cache (which widgets also write) has, so none
+    /// drops out, turns into "loading", or goes back to an older reading in between. A key that
+    /// stopped working (signed out, expired, not on the plan) shows as that, whatever is saved.
     private func localEnvelope(now: Date) -> RelayEnvelope {
-        let providers = keyedProviders.map { provider in
-            RelayProvider(provider: provider, status: localStatuses[provider] ?? .loading, checkedAt: localCheckedAt[provider])
+        let saved = savedOwnReadings(now: now)
+        let owned = keysRead || defaults.array(forKey: Keys.keyedProviders) != nil
+            ? keyedProviders
+            : Provider.allCases.filter { saved[$0.rawValue] != nil }
+        let providers = owned.map { provider -> RelayProvider in
+            let standIn = saved[provider.rawValue]
+            guard let status = localStatuses[provider], status != .loading else {
+                return standIn ?? RelayProvider(provider: provider, status: .loading, checkedAt: nil)
+            }
+            let mine = RelayProvider(provider: provider, status: status, checkedAt: localCheckedAt[provider])
+            guard let standIn, !["signedOut", "expired", "notEntitled"].contains(mine.state),
+                  let standInTime = Self.readingTime(standIn),
+                  standInTime > (Self.readingTime(mine) ?? .distantPast)
+            else { return mine }
+            return standIn
         }
         return RelayEnvelope(producer: "iphone", appVersion: TokenroomIdentity.version, checkedAt: now, providers: providers)
+    }
+
+    /// The newest reading of each of this iPhone's providers in its iCloud record and the cache,
+    /// up to a week old.
+    private func savedOwnReadings(now: Date) -> [String: RelayProvider] {
+        let cache = cacheURL.flatMap { ReadingCache.load(from: $0) }
+        let cached = cache.map { $0.isSample ? [] : $0.items.filter { $0.source == Self.localLabel }.map(\.provider) } ?? []
+        var newest: [String: RelayProvider] = [:]
+        for provider in (ownRecord?.providers ?? []) + cached {
+            guard let time = Self.readingTime(provider), now.timeIntervalSince(time) < Self.standInLimit else { continue }
+            if let kept = newest[provider.id], let keptTime = Self.readingTime(kept), keptTime >= time { continue }
+            newest[provider.id] = provider
+        }
+        return newest
+    }
+
+    private static func readingTime(_ provider: RelayProvider) -> Date? {
+        provider.checkedAt ?? provider.fetchedAt
     }
 
     /// Relays what this iPhone read with its keys, so the Watch and other devices can show it.
     /// Once this iPhone has published, it keeps its record current, even when that's empty.
     private func publish(now: Date) async {
-        guard let relay, relayPhase == .ready, !sampleMode else { return }
+        guard let relay, relayPhase == .ready, !sampleMode, keysRead else { return }
         let published = defaults.bool(forKey: Keys.published)
         guard !keyedProviders.isEmpty || published else { return }
         let envelope = localEnvelope(now: now)
+        if let relayRetryAt, relayRetryAt > now { return }
         if publishPolicy.isDue(envelope, now: now) {
             do {
                 try await relay.publish(sourceID: sourceID, kind: "iphone", label: "iPhone", envelope: envelope)
@@ -352,6 +456,7 @@ final class MobileStore {
                 defaults.set(true, forKey: Keys.published)
             } catch {
                 logger.error("relay publish failed: \(String(describing: error), privacy: .public)")
+                handleRelayError(error, now: now)
                 return
             }
         }
@@ -373,14 +478,85 @@ final class MobileStore {
     /// These are local: iCloud doesn't notify the device that saved a record.
     private func sendAlerts(now: Date) async {
         guard !sampleMode, !localStatuses.isEmpty else { return }
-        let coveredByMacs = Set(relaySources.compactMap(\.envelope).flatMap { envelope in
+        await claimShownAlerts(now: now)
+        // Only Macs count: two iPhones with the same key would each wait for the other.
+        let coveredByMacs = Set(relaySources.compactMap(\.envelope).filter { $0.producer == "mac" }.flatMap { envelope in
             envelope.providers.filter { $0.isLive && now.timeIntervalSince(envelope.checkedAt) < 3600 }.map(\.id)
         })
-        let providers = localEnvelope(now: now).providers.filter { !coveredByMacs.contains($0.id) }
-        let alerts = alertLedger.process(providers, preferences: alertPreferences, now: now)
-            .filter { alertPreferences.shouldSend($0, at: now) }
+        // Every provider this launch read keeps the ledger current (saved stand-ins could take it
+        // back in time). Alerts for ones a Mac reports live come from that Mac, so here they stay
+        // pending: claimed if the Mac goes quiet, dropped after 18 hours.
+        let read = keyedProviders.compactMap { provider in
+            localStatuses[provider].map { RelayProvider(provider: provider, status: $0, checkedAt: localCheckedAt[provider]) }
+        }
+        alertLedger.process(read, preferences: alertPreferences, now: now)
+        // Urgent ones now; the rest when quiet hours end.
+        let due = alertLedger.due(preferences: alertPreferences, now: now).filter { !coveredByMacs.contains($0.provider) }
+        var shown = unclaimed
+        for alert in due {
+            switch await claim(alert) {
+            case .ours:
+                Self.notify(alert)
+            case .taken:
+                break
+            case .unasked:
+                Self.notify(alert)
+                shown.append(ShownAlert(alert: alert, shownAt: now))
+            }
+        }
+        unclaimed = shown
+        alertLedger.markSent(due.map(\.id), at: now)
         alertLedger.save(to: directory)
-        alerts.forEach(Self.notify)
+    }
+
+    private enum Claim {
+        /// This iPhone's record now stands for the alert: show it.
+        case ours
+        /// Another device's record was there first; its notification came through iCloud.
+        case taken
+        /// iCloud couldn't be asked, or the alert subscription doesn't filter by kind yet (so a
+        /// record of this iPhone's own would come back to it): show it, and claim it later.
+        case unasked
+    }
+
+    private func claim(_ alert: UsageAlert) async -> Claim {
+        guard let relay, relayPhase == .ready, defaults.bool(forKey: Keys.alertsFiltered) else { return .unasked }
+        do {
+            return try await relay.claimAlert(alert) ? .ours : .taken
+        } catch {
+            logger.error("alert claim failed: \(String(describing: error), privacy: .public)")
+            return .unasked
+        }
+    }
+
+    /// An alert shown before it could be claimed.
+    private struct ShownAlert: Codable {
+        var alert: UsageAlert
+        var shownAt: Date
+    }
+
+    private var unclaimed: [ShownAlert] {
+        get { defaults.data(forKey: Keys.unclaimedAlerts).flatMap { try? JSONDecoder().decode([ShownAlert].self, from: $0) } ?? [] }
+        set { defaults.set(newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue), forKey: Keys.unclaimedAlerts) }
+    }
+
+    /// Claims alerts shown while iCloud was away, so a Mac that sees the same crossing later
+    /// only updates the record and doesn't alert again. Ones older than 18 hours are dropped.
+    private func claimShownAlerts(now: Date) async {
+        let shown = unclaimed.filter { now.timeIntervalSince($0.shownAt) < AlertLedger.pendingLifetime }
+        guard let relay, relayPhase == .ready, defaults.bool(forKey: Keys.alertsFiltered), !shown.isEmpty else {
+            unclaimed = shown
+            return
+        }
+        var left: [ShownAlert] = []
+        for item in shown {
+            do {
+                _ = try await relay.claimAlert(item.alert)
+            } catch {
+                left.append(item)
+            }
+        }
+        unclaimed = left
     }
 
     private static func notify(_ alert: UsageAlert) {
@@ -396,8 +572,7 @@ final class MobileStore {
     /// Lets Macs follow this iPhone's choices. Retried on the next refresh if iCloud is away.
     func shareAlertPreferences() async {
         guard let relay, relayPhase == .ready, !defaults.bool(forKey: Keys.alertPreferencesShared) else { return }
-        var preferences = alertPreferences
-        preferences.timeZoneID = TimeZone.current.identifier
+        let preferences = alertPreferences
         do {
             try await relay.publishAlertPreferences(preferences)
             defaults.set(true, forKey: Keys.alertPreferencesShared)
@@ -433,9 +608,13 @@ final class MobileStore {
         publishPolicy.reset()
         lastHistoryHour = nil
         relayEvents = []
+        ownRecord = nil
+        subscriptionsCurrent = false
         defaults.set(false, forKey: Keys.published)
         defaults.set(false, forKey: Keys.alertPreferencesShared)
         rebuild()
+        // The zone's subscriptions went with it; without new ones, pushes and alerts stop.
+        await prepareNotifications()
     }
 
     /// A background app refresh: the relay and this iPhone's keys, then the next request.
@@ -463,12 +642,16 @@ final class MobileStore {
         }
     }
 
-    /// Subscribes to source changes (silent) and alert events (visible notifications).
+    /// Subscribes to source changes (silent) and the alert kinds turned on (visible
+    /// notifications); called again whenever the alert choices change.
     func prepareNotifications() async {
         guard let relay else { return }
         do {
-            try await relay.ensureSubscriptions()
+            let filtered = try await relay.ensureSubscriptions(alertKeys: alertPreferences.subscribedKeys)
+            defaults.set(filtered, forKey: Keys.alertsFiltered)
+            subscriptionsCurrent = true
         } catch {
+            subscriptionsCurrent = false
             logger.error("subscriptions failed: \(String(describing: error), privacy: .public)")
         }
     }
@@ -480,9 +663,12 @@ final class MobileStore {
         return await BlockingIO.run { keys.metadata(for: provider) }
     }
 
-    func saveKey(_ key: String, for provider: Provider, region: String?) async throws {
+    func saveKey(_ key: String, for provider: Provider, region: String?, warning: String? = nil) async throws {
         let keys = self.keys
-        try await BlockingIO.run { try keys.save(key, for: provider, region: region) }
+        try await BlockingIO.run { try keys.save(key, for: provider, region: region, warning: warning) }
+        keyedProviders = Provider.allCases.filter { $0 == provider || keyedProviders.contains($0) }
+        defaults.set(keyedProviders.map(\.rawValue), forKey: Keys.keyedProviders)
+        publishPolicy.reset()
         hasOnboarded = true
         if sampleMode {
             sampleMode = false
@@ -495,7 +681,16 @@ final class MobileStore {
         try await BlockingIO.run { try keys.remove(for: provider) }
         localStatuses[provider] = nil
         localCheckedAt[provider] = nil
+        // Gone from iCloud on this refresh, not a minute later, so no launch brings it back.
+        keyedProviders.removeAll { $0 == provider }
+        defaults.set(keyedProviders.map(\.rawValue), forKey: Keys.keyedProviders)
+        publishPolicy.reset()
         await refresh(force: true)
+    }
+
+    /// The currency a provider's reference or budget is entered in: its balance's currency.
+    func budgetCurrency(for provider: Provider) -> String {
+        localStatuses[provider]?.snapshot?.budgetCurrencyCode ?? "USD"
     }
 
     func budget(for provider: Provider) -> Double? {

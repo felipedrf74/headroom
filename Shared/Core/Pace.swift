@@ -50,6 +50,7 @@ struct Pace: Equatable, Sendable {
         startsAt: Date? = nil,
         windowSeconds: Double? = nil,
         samples: [(date: Date, used: Double)] = [],
+        measured: RelayPace? = nil,
         isStale: Bool = false,
         now: Date = .now,
         calendar: Calendar = .gregorianUTC
@@ -79,7 +80,10 @@ struct Pace: Equatable, Sendable {
         }
 
         var runsOut: Date?
-        if let rate = recentRate(samples: samples, since: start, kind: kind, now: now) ?? linearRate(used: used, elapsed: elapsed),
+        if let measured {
+            // Measured by a collector with frequent readings (the Mac): better than hourly buckets.
+            runsOut = measured.runsOutAt.flatMap { $0 > now && $0 < resetsAt ? $0 : nil }
+        } else if let rate = recentRate(samples: samples, since: start, kind: kind, now: now) ?? linearRate(used: used, elapsed: elapsed),
            rate > 0 {
             let projected = now.addingTimeInterval((100 - used) / rate)
             if projected < resetsAt {
@@ -168,6 +172,11 @@ extension Calendar {
 }
 
 extension Pace {
+    /// Ahead of an even pace, or out: worth color and weight.
+    var needsAttention: Bool {
+        verdict == .ahead || verdict == .limitReached
+    }
+
     /// One short line for captions: "On pace", "Plenty left",
     /// "Ahead of pace · runs out Thu 14:00", "Limit reached · resets in 2h 10m".
     func caption(now: Date = .now, timeZone: TimeZone = .current) -> String {

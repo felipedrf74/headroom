@@ -156,7 +156,7 @@ final class SignInCoordinator {
         Tooling.open(script)
     }
 
-    private static func quote(_ value: String) -> String {
+    private nonisolated static func quote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

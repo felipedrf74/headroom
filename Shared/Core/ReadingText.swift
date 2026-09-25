@@ -2,10 +2,10 @@ import Foundation
 
 /// Words for readings, shared by the Mac popover, the iPhone, widgets, and the Watch.
 enum ReadingText {
-    /// A balance or spend where a percentage would go: "$12.40", or "$312.50 spent".
+    /// A balance or spend where a percentage would go: "$12.40 left", or "$312.50 spent".
     static func amountHeadline(_ amount: QuotaAmount) -> String? {
         if let remaining = amount.remainingOrComputed {
-            return AmountFormat.text(remaining, unit: amount.unit)
+            return "\(AmountFormat.text(remaining, unit: amount.unit)) left"
         }
         return amount.used.map { "\(AmountFormat.text($0, unit: amount.unit)) spent" }
     }

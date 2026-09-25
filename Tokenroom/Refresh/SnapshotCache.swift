@@ -17,6 +17,32 @@ struct SnapshotCache: Sendable {
         directory.appendingPathComponent("snapshots.json")
     }
 
+    /// When each provider last answered, which a reading's own time can't say: an unchanged
+    /// reading keeps the time it first appeared.
+    var checkedURL: URL {
+        directory.appendingPathComponent("checked.json")
+    }
+
+    func loadChecked() -> [Provider: Date] {
+        guard let data = try? Data(contentsOf: checkedURL),
+              let decoded = try? JSONDecoder().decode([String: Date].self, from: data)
+        else { return [:] }
+        var result: [Provider: Date] = [:]
+        for (key, date) in decoded {
+            if let provider = Provider(rawValue: key) {
+                result[provider] = date
+            }
+        }
+        return result
+    }
+
+    func saveChecked(_ checked: [Provider: Date]) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload = Dictionary(uniqueKeysWithValues: checked.map { ($0.key.rawValue, $0.value) })
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        try? data.write(to: checkedURL, options: .atomic)
+    }
+
     func load() -> [Provider: QuotaSnapshot] {
         guard let data = try? Data(contentsOf: fileURL) else { return [:] }
         return Self.decode(data)

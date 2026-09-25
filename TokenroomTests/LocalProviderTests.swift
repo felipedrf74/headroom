@@ -55,6 +55,69 @@ final class LocalProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.resetsAt, utc(2026, 10, 15))
     }
 
+    func testCopilotTokenBillingCountsAICredits() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("copilot-user-pro")) as? [String: Any])
+        object["token_based_billing"] = true
+        let snapshot = try CopilotParser.snapshot(from: JSONSerialization.data(withJSONObject: object), fetchedAt: now)
+        XCTAssertEqual(snapshot.windows.map(\.title), ["AI credits"])
+        XCTAssertEqual(snapshot.windows[0].id, "premium_interactions", "Same bucket, same ID, so history carries on")
+        XCTAssertEqual(snapshot.windows[0].amount?.unit, "credits")
+        XCTAssertEqual(snapshot.primaryTitle, "AI credits")
+        XCTAssertEqual(try CopilotParser.snapshot(from: fixture("copilot-user-free"), fetchedAt: now).windows.map(\.title), ["Chat", "Completions"], "Only the premium bucket is renamed")
+    }
+
+    // MARK: Copilot billing API
+
+    func testCopilotBillingSumsGrossQuantityAcrossModels() throws {
+        XCTAssertEqual(try CopilotBilling.used(from: fixture("copilot-ai-credit-usage")), 600.5, accuracy: 0.0001, "What the plan covered counts too")
+        XCTAssertEqual(try CopilotBilling.used(from: Data(#"{"usageItems":[]}"#.utf8)), 0)
+        XCTAssertThrowsError(try CopilotBilling.used(from: Data(#"{"timePeriod":{"year":2026,"month":9}}"#.utf8)))
+        XCTAssertEqual(try CopilotBilling.login(from: Data(#"{"login":"octocat-placeholder","id":1}"#.utf8)), "octocat-placeholder")
+        XCTAssertThrowsError(try CopilotBilling.login(from: Data(#"{"login":""}"#.utf8)))
+    }
+
+    func testCopilotBillingPlans() throws {
+        let pro = try CopilotBilling.snapshot(used: 600.5, plan: CopilotBilling.plan(named: "Pro"), now: now)
+        let credits = try XCTUnwrap(pro.windows.first)
+        XCTAssertEqual(credits.id, "ai_credits")
+        XCTAssertEqual(credits.title, "AI credits")
+        XCTAssertEqual(credits.usedPercent, 600.5 / 1_500 * 100, accuracy: 0.001)
+        XCTAssertEqual(credits.amount, QuotaAmount(used: 600.5, limit: 1_500, remaining: 899.5, unit: "credits"))
+        XCTAssertTrue(credits.isMetered)
+        XCTAssertEqual(pro.planLabel, "Copilot Pro")
+
+        let yearly = try XCTUnwrap(CopilotBilling.snapshot(used: 312, plan: CopilotBilling.plan(named: "Pro, yearly"), now: now).windows.first)
+        XCTAssertEqual(yearly.id, "premium_interactions", "Yearly plans from before June 2026 still count premium requests")
+        XCTAssertEqual(yearly.amount?.unit, "requests")
+        XCTAssertEqual(yearly.usedPercent, 100)
+        XCTAssertEqual(yearly.amount?.remaining, 0)
+
+        let free = try XCTUnwrap(CopilotBilling.snapshot(used: 40, plan: CopilotBilling.plan(named: "Free"), now: now).windows.first)
+        XCTAssertFalse(free.isMetered, "No published allowance: an amount, not a meter")
+        XCTAssertEqual(free.usedPercent, 0)
+        XCTAssertNil(free.amount?.limit)
+        XCTAssertNil(free.amount?.remaining)
+
+        XCTAssertEqual(CopilotBilling.plan(named: nil).name, "Pro")
+        XCTAssertEqual(CopilotBilling.plan(named: "Something new").name, "Pro")
+    }
+
+    func testCopilotBillingMonthIsUTC() throws {
+        let lastEvening = Calendar.gregorianUTC.date(from: DateComponents(year: 2026, month: 12, day: 31, hour: 23, minute: 30))!
+        let december = CopilotBilling.month(containing: lastEvening)
+        XCTAssertEqual(december.start, utc(2026, 12, 1))
+        XCTAssertEqual(december.end, utc(2027, 1, 1))
+        XCTAssertEqual(december.year, 2026)
+        XCTAssertEqual(december.month, 12)
+        // 00:30 on 1 October in Madrid is still September in UTC, and GitHub bills in UTC.
+        let september = CopilotBilling.month(containing: Calendar.gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: 22, minute: 30))!)
+        XCTAssertEqual(september.month, 9)
+        XCTAssertEqual(september.end, utc(2026, 10, 1))
+        let snapshot = try CopilotBilling.snapshot(used: 10, plan: CopilotBilling.plan(named: "Pro"), now: lastEvening)
+        XCTAssertEqual(snapshot.resetsAt, utc(2027, 1, 1))
+        XCTAssertEqual(snapshot.windows.first?.startsAt, utc(2026, 12, 1))
+    }
+
     func testCopilotWithoutQuotasIsNotEntitled() {
         XCTAssertThrowsError(try CopilotParser.snapshot(from: Data(#"{"copilot_plan":"business","quota_snapshots":{}}"#.utf8), fetchedAt: now)) { error in
             guard case ProviderError.notEntitled = error else { return XCTFail("\(error)") }

@@ -2,40 +2,65 @@
 
 ## 2.0.0 — Unreleased
 
-Headroom is now **Tokenroom**. On first launch Tokenroom brings over Headroom’s settings and last readings, and offers to quit Headroom.
+Headroom is now **Tokenroom**, on the Mac and, new, on iPhone and Apple Watch. On first launch Tokenroom brings over Headroom’s settings and last readings, and offers to quit Headroom.
+
+A new icon: a “T” made of two usage meters, white on orange. On iPhone, Apple Watch, and macOS 26 or later it's drawn in Liquid Glass, with dark, tinted, and clear looks.
+
+### iPhone and Apple Watch
+- **Tokenroom for iPhone** shows your Mac's readings through your own iCloud, and reads coding plans, pay-as-you-go balances, and organization spend itself with keys you add there. Keys stay in the iPhone's Keychain.
+- **Next up**: the most pressing limit, with its pace, a live countdown to the reset, and Follow on Lock Screen. Chips below it count banked resets, new models, and updates.
+- **Widgets** for the Home Screen and Lock Screen, with countdowns that tick without reloads, and a refresh button.
+- **Live Activity** that follows a session, or a nearly spent week, on the Lock Screen and in the Dynamic Island until it resets. Start it from the app, Control Center, the Action button, or Siri.
+- **Apple Watch** app, complications, and a Smart Stack widget for a limit near its reset or past 80%. The Watch reads iCloud directly, so it works with the iPhone away.
+- **Sample data** to look around first.
+
+### Pace, history, and forecasts
+- A tick on every meter marks an even pace; "Ahead of pace · runs out Sat 11:37" shows when you'd hit a limit before it resets. The Mac measures pace from its frequent readings and sends it along, so the iPhone and Watch show the same forecast.
+- A week of hourly history for every window, with the resets marked.
+- Balances say how many days they last at this week's rate; organization spend says where the month is heading.
+
+### Alerts
+- At 80% and 95%, when a window that reached 80% resets, when a banked reset arrives or is about to expire, and when a balance or budget runs low. They go to your iPhone through iCloud once per event, however many Macs see it, and still once when your iPhone reads the same provider with its own key.
+- Quiet hours hold the alerts that can wait until morning; 95% and a banked reset about to expire come through.
+- Alert choices are shared: change them on the Mac (Settings › Alerts) or the iPhone, and both follow. The iPhone only gets notified for the kinds you turned on.
+- An alert iCloud didn't take is tried again, instead of lost.
+
+### News
+- New models from the labs you follow, from OpenRouter's public list, and official changelogs and blogs from Claude Code, Codex and ChatGPT, Gemini and Antigravity, GitHub Copilot, Cursor, Devin, Z.ai, Kimi Code, MiniMax, and OpenRouter.
+- On the Mac it's off until you turn it on, and opens in its own window.
 
 ### New providers
-- **GitHub Copilot**, with the login Copilot’s editor extensions or the gh CLI already keep.
+- **GitHub Copilot**, with the login Copilot’s editor extensions or the gh CLI already keep, or a fine-grained token for GitHub's billing API, which also works on iPhone. Copilot counts AI credits, GitHub's name for premium requests since June.
 - **Antigravity**, through `agy` 1.1.11 or later.
 - **Devin** (formerly Windsurf).
 - **Coding plans:** Z.ai, Kimi Code, MiniMax, and OpenCode Go. Tokenroom uses the key Claude Code, the kimi CLI, or OpenCode already has, or one you add.
-- **Pay as you go:** OpenRouter, DeepSeek, Moonshot, and Vercel AI Gateway, with an API key you add. A budget turns a balance into a meter.
-- **Organization billing:** this month’s OpenAI, Anthropic, and xAI spend with an admin or management key, against a monthly budget.
+- **Pay as you go:** OpenRouter, DeepSeek, Moonshot, and Vercel AI Gateway, with an API key you add. A reference amount, in the balance's own currency, turns a balance into a meter.
+- **Organization billing:** this month’s OpenAI, Anthropic, and xAI spend with an admin or management key, against a monthly budget. These never turn on by themselves, and an xAI key that can also change billing or keys gets a warning.
 
-API keys stay in the Mac’s Keychain; only the last four characters are shown.
+API keys stay in the Mac’s Keychain, in the data-protection keychain on signed builds; only the last four characters are shown.
 
 ### Richer readings
 - Codex: plan, credits, spend limit, named limits, and banked resets.
-- Claude: per-model caps and extra usage. An optional Claude Code status-line bridge keeps Claude’s meters current when the direct read can’t.
-- Cursor 3.9 and later: the login in the Keychain. Grok: your plan’s name.
+- Claude: per-model caps and extra usage. An optional Claude Code status-line bridge keeps Claude’s meters current when the direct read can’t; a fresh status-line reading saves a call, and the other windows stay when the direct read fails. It edits only the status line in `~/.claude/settings.json`, keeping the rest of the file as you wrote it, and points out projects whose own status line replaces it.
+- Cursor 3.9 and later: the login in the Keychain comes first. Grok: your plan’s name.
 
-### Alerts
-- Alerts at 80% and 95%, when a window that reached 80% resets, and when a banked reset arrives or is about to expire. They go to your iPhone through iCloud once per event, however many Macs see it, and follow the iPhone's quiet hours. Settings › iPhone & Watch can show them on the Mac too.
-
-### Menu bar and settings
-- Settings has Providers, Menu Bar, iPhone & Watch, and General tabs.
+### Mac popover and settings
+- Click a provider for every window, a week of history, pace, forecasts, and banked resets. With more than five providers connected, each takes one line.
+- A footer strip counts banked resets, new models, and updates.
+- Settings has General, Providers (connected, detected on this Mac, available, and organization billing), API Keys, Alerts, News, Menu Bar, and iPhone & Watch tabs.
 - Any provider can be left out of the menu bar, and the **Highest** style shows only the most-used meter.
-- The popover lists connected providers first and folds the rest under “Not connected”.
+- Providers read from their apps' own endpoints are labeled unofficial.
 
 ### Changes
-- Tokenroom only reads other tools’ sessions. It no longer refreshes Claude or Grok tokens or writes them back, so it can’t break a Claude Code or Grok CLI session. An expired session keeps its last reading, faded, for up to a day.
-- Providers that answer “too many requests” are left alone until their Retry-After passes.
+- Tokenroom only reads other tools’ sessions. It no longer refreshes Claude or Grok tokens or writes them back, so it can’t break a Claude Code or Grok CLI session. An expired session keeps its last reading, faded, for up to a day, even across a relaunch.
+- Providers that answer “too many requests” are left alone until their Retry-After passes. Spacing between checks counts from the last attempt, so failures don't bring the next call closer.
+- Balances read "$12.40 left" everywhere.
 - Grok Bot off a Cursor plan says so instead of asking you to sign in.
 - Requests identify themselves as Tokenroom, except where a provider only answers its own client (Claude, Devin).
 
 ### Fixes
 - The app could freeze while waiting on the Keychain during Claude sign-in.
-- Keychain, file, and database reads no longer run on the main thread.
+- Keychain, file, and database reads no longer run on the main thread, including the check for new providers at launch.
 - Turning Grok Bot off now survives a relaunch, and turning every provider off stays off.
 - A damaged cache entry no longer wipes the other readings.
 - “Last good reading” shows when the reading was last confirmed, not when it first appeared.

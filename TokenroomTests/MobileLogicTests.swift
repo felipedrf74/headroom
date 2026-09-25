@@ -1,14 +1,25 @@
+import CloudKit
 import XCTest
 @testable import Tokenroom
 
 /// The shared logic the iPhone app, widgets, and Watch run, tested on the Mac.
 final class MobileLogicTests: XCTestCase {
     private let now = Calendar.gregorianUTC.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 12))!
+    private var suites: [String] = []
 
     override func tearDown() {
         TokenroomHTTP.overrideSession(nil)
         StubURLProtocol.reset()
+        suites.forEach { UserDefaults(suiteName: $0)?.removePersistentDomain(forName: $0) }
+        suites = []
         super.tearDown()
+    }
+
+    /// A throwaway stand-in for the App Group's defaults.
+    private func makeDefaults() -> UserDefaults {
+        let name = "tokenroom.tests.\(UUID().uuidString)"
+        suites.append(name)
+        return UserDefaults(suiteName: name)!
     }
 
     private func snapshot(_ provider: Provider = .claude, used: Double = 40, fetchedAt: Date? = nil) -> QuotaSnapshot {
@@ -58,6 +69,15 @@ final class MobileLogicTests: XCTestCase {
         let changed = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 60)), checkedAt: now)])
         XCTAssertFalse(policy.isDue(changed, now: now.addingTimeInterval(4 * 60)))
         XCTAssertTrue(policy.isDue(changed, now: now.addingTimeInterval(5 * 60)))
+
+        let crossed = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 82)), checkedAt: now)])
+        XCTAssertFalse(policy.isDue(crossed, now: now.addingTimeInterval(59)))
+        XCTAssertTrue(policy.isDue(crossed, now: now.addingTimeInterval(61)), "Crossing 80% goes out after a minute, like a status change")
+        var almost = RelayPublishPolicy()
+        let below = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 79.6)), checkedAt: now)])
+        let above = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 80.3)), checkedAt: now)])
+        almost.didSend(below, at: now)
+        XCTAssertTrue(almost.isDue(above, now: now.addingTimeInterval(61)), "Even when both round to 80%")
 
         let expired = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .expired("x", cached: nil), checkedAt: now)])
         XCTAssertTrue(policy.isDue(expired, now: now.addingTimeInterval(61)), "A status change goes out after a minute")
@@ -189,7 +209,7 @@ final class MobileLogicTests: XCTestCase {
     // MARK: Deep links and text
 
     func testDeepLinksRoundTrip() {
-        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .news, .settings, .keys] {
+        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .news, .settings, .keys, .alerts] {
             XCTAssertEqual(DeepLink(link.url), link)
         }
         XCTAssertNil(DeepLink(URL(string: "https://example.com/provider/claude")!))
@@ -198,12 +218,96 @@ final class MobileLogicTests: XCTestCase {
 
     func testReadingText() {
         let balance = RelayWindow(id: "b", kind: "pool", title: "Balance", used: 0, amount: QuotaAmount(remaining: 12.4, unit: "usd"), metered: false)
-        XCTAssertEqual(ReadingText.headline(balance), 12.4.formatted(.currency(code: "USD")))
+        XCTAssertEqual(ReadingText.headline(balance), "\(12.4.formatted(.currency(code: "USD"))) left")
         let meter = RelayWindow(id: "w", kind: "weekly", title: "Weekly", used: 63.6, resetsAt: now.addingTimeInterval(2 * 86_400 + 3600))
         XCTAssertEqual(ReadingText.headline(meter), "64%")
         XCTAssertEqual(ReadingText.caption(meter, now: now), "Weekly · resets in 2d 1h")
         XCTAssertEqual(ReadingText.amountDetail(QuotaAmount(used: 249, limit: 300, remaining: 51, unit: "requests")), "249 of 300 requests")
         XCTAssertEqual(ReadingText.amountDetail(QuotaAmount(used: 312.5, unit: "usd")), "\(312.5.formatted(.currency(code: "USD"))) spent")
+    }
+
+    // MARK: State shared with the widgets
+
+    func testKeyFetchGateSpacesCallsFromTheLastAttempt() {
+        let defaults = makeDefaults()
+        let app = KeyFetchGate(defaults: defaults)
+        XCTAssertFalse(app.isResting(.anthropicOrg, now: now))
+        app.recordAttempt(.anthropicOrg, at: now)
+        let widget = KeyFetchGate(defaults: defaults)
+        XCTAssertTrue(widget.isResting(.anthropicOrg, now: now.addingTimeInterval(14 * 60)), "A widget sees the app's call: Anthropic allows one every 15 minutes")
+        XCTAssertFalse(widget.isResting(.anthropicOrg, now: now.addingTimeInterval(15 * 60)))
+
+        app.recordAttempt(.openrouter, at: now)
+        XCTAssertFalse(app.isResting(.openrouter, now: now), "No spacing without a minimum interval")
+    }
+
+    func testKeyFetchGateHoldsOffAfterA429UntilCleared() {
+        let gate = KeyFetchGate(defaults: makeDefaults())
+        gate.block(.openrouter, until: now.addingTimeInterval(600))
+        XCTAssertTrue(gate.isResting(.openrouter, now: now.addingTimeInterval(599)))
+        XCTAssertFalse(gate.isResting(.openrouter, now: now.addingTimeInterval(600)))
+        XCTAssertFalse(gate.isResting(.deepseek, now: now), "Only the provider that asked")
+
+        gate.block(.openrouter, until: now.addingTimeInterval(600))
+        gate.recordAttempt(.openrouter, at: now)
+        gate.block(.openrouter, until: nil)
+        XCTAssertFalse(gate.isResting(.openrouter, now: now.addingTimeInterval(1)), "A good answer clears the wait")
+    }
+
+    func testWidgetReloadLogCountsTheLastDayAndForgetsAfterTwo() {
+        let defaults = makeDefaults()
+        XCTAssertEqual(WidgetReloadLog.count(lastDayBefore: now, defaults: defaults), 0)
+        for hoursAgo in [50.0, 30, 23, 1, 0] {
+            WidgetReloadLog.record(at: now.addingTimeInterval(-hoursAgo * 3600), defaults: defaults)
+        }
+        XCTAssertEqual(WidgetReloadLog.count(lastDayBefore: now, defaults: defaults), 3)
+        let kept = defaults.array(forKey: WidgetReloadLog.defaultsKey) as? [Double]
+        XCTAssertEqual(kept?.count, 4, "Older than two days is dropped")
+    }
+
+    func testWidgetsReloadHalfHourlyOnlyWhileAWindowIsBusy() {
+        func item(used: Double, resetsIn hours: Double, live: Bool = true) -> ReadingCache.Item {
+            let window = QuotaWindow(id: "session", kind: .session, title: "Session", usedPercent: used, resetsAt: now.addingTimeInterval(hours * 3600), windowSeconds: 5 * 3600)
+            let snapshot = try! QuotaSnapshot.headlined(by: [window], provider: .claude, fetchedAt: now)
+            return ReadingCache.Item(provider: RelayProvider(provider: .claude, status: live ? .live(snapshot) : .stale(snapshot), checkedAt: now), source: "Mac")
+        }
+        let hourly = now.addingTimeInterval(3600)
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: [item(used: 40, resetsIn: 3)]), hourly, "Calm readings reload hourly")
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: [item(used: 85, resetsIn: 3)]), now.addingTimeInterval(1800), "At 80% or more and resetting within 12 hours, every half hour")
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: [item(used: 85, resetsIn: 20 * 24)]), hourly, "A month-long budget at 85% doesn't hurry")
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: [item(used: 85, resetsIn: -1)]), hourly, "Nor a window that has already reset")
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: [item(used: 85, resetsIn: 3, live: false)]), hourly, "Nor a reading that isn't live")
+        XCTAssertEqual(WidgetSchedule.nextReload(after: now, items: []), hourly)
+        XCTAssertLessThan(24 * 3600 / WidgetSchedule.calmInterval, 40, "A calm day stays under WidgetKit's budget")
+    }
+
+    // MARK: iCloud failures
+
+    func testRelayErrorPolicy() {
+        func outcome(_ error: Error) -> RelayErrorPolicy.Outcome {
+            RelayErrorPolicy.outcome(for: error, defaultRetry: 300)
+        }
+        XCTAssertEqual(outcome(CKError(.notAuthenticated)), .noAccount)
+        XCTAssertEqual(outcome(CancellationError()), .cancelled, "A refresh that gave way to a newer one isn't a failure")
+        XCTAssertEqual(outcome(CKError(.operationCancelled)), .cancelled)
+        XCTAssertEqual(outcome(CKError(.missingEntitlement)), .unavailable)
+        XCTAssertEqual(outcome(CKError(.permissionFailure)), .unavailable)
+        guard case .paused = outcome(CKError(.quotaExceeded)) else { return XCTFail("A full iCloud needs the user") }
+        guard case .paused = outcome(CKError(.userDeletedZone)) else { return XCTFail("Deleted data needs the user") }
+        guard case .retry(let asked, _) = outcome(CKError(.requestRateLimited, userInfo: [CKErrorRetryAfterKey: 42.0])) else { return XCTFail("Rate limits retry") }
+        XCTAssertEqual(asked, 42, "iCloud's own wait wins")
+        guard case .retry(let busy, _) = outcome(CKError(.zoneBusy)) else { return XCTFail("A busy zone retries") }
+        XCTAssertEqual(busy, 300)
+        guard case .retry(let offline, _) = outcome(CKError(.networkUnavailable)) else { return XCTFail("Offline retries") }
+        XCTAssertEqual(offline, 300)
+        guard case .retry(let container, _) = outcome(CKError(.badContainer, userInfo: [CKErrorRetryAfterKey: 30.0])) else { return XCTFail("A new container retries") }
+        XCTAssertEqual(container, 300, "A new container gets at least the usual wait")
+        XCTAssertEqual(outcome(CKError(.unknownItem)), .failed("Couldn't reach iCloud."))
+        XCTAssertEqual(outcome(URLError(.notConnectedToInternet)), .failed("Couldn't reach iCloud."))
+
+        XCTAssertFalse(RelayErrorPolicy.Outcome.failed("x").stopsBatch, "One bad record doesn't stop the rest")
+        XCTAssertTrue(outcome(CKError(.zoneBusy)).stopsBatch)
+        XCTAssertTrue(RelayErrorPolicy.Outcome.noAccount.stopsBatch)
     }
 
     // MARK: Nothing secret leaves the device
@@ -230,7 +334,15 @@ final class MobileLogicTests: XCTestCase {
         let provider = RelayProvider(provider: .openrouter, status: .live(snapshot), checkedAt: now)
         let envelope = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [provider])
         let cache = ReadingCache(savedAt: now, isSample: false, items: [ReadingCache.Item(provider: provider, source: "This iPhone", history: history.series)])
-        let payloads = [try envelope.encoded(), try history.encoded(), try RelayEnvelope.encoder.encode(cache)].map { String(decoding: $0, as: UTF8.self) }
+        // An alert from the same reading, as its Event record carries it, and the shared choices.
+        var calm = provider, busy = provider
+        calm.windows[0].used = 10
+        busy.windows[0].used = 85
+        let alerts = AlertRules.alerts(previous: calm, current: busy, preferences: AlertPreferences(), now: now)
+        XCTAssertFalse(alerts.isEmpty)
+        let events = alerts.map { [$0.id, $0.provider, $0.title, $0.body, $0.key, $0.shownKey].joined(separator: "|") }
+        let payloads = [try envelope.encoded(), try history.encoded(), try RelayEnvelope.encoder.encode(cache), try RelayEnvelope.encoder.encode(AlertPreferences())]
+            .map { String(decoding: $0, as: UTF8.self) } + events
         for payload in payloads {
             XCTAssertFalse(payload.contains("QXJ7"), "No part of the key")
             XCTAssertFalse(payload.contains("ZKP9"), "Not even its last four characters")

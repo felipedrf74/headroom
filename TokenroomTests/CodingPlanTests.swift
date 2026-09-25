@@ -243,10 +243,13 @@ final class CodingPlanTests: XCTestCase {
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
     nonisolated(unsafe) static var requests: [URLRequest] = []
+    /// Extra response headers, e.g. `Retry-After`.
+    nonisolated(unsafe) static var headers: [String: String] = [:]
 
     static func reset() {
         handler = nil
         requests = []
+        headers = [:]
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -255,7 +258,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         Self.requests.append(request)
         let (status, data) = Self.handler?(request) ?? (404, Data())
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        let fields = ["Content-Type": "application/json"].merging(Self.headers) { $1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)

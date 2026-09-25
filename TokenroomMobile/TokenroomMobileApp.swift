@@ -4,22 +4,25 @@ import UserNotifications
 @main
 struct TokenroomMobileApp: App {
     @UIApplicationDelegateAdaptor(MobileAppDelegate.self) private var appDelegate
-    @State private var store = MobileStore()
-    @State private var news = NewsStore()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
+        let store = appDelegate.store
+        let news = appDelegate.news
         WindowGroup {
             RootView(store: store, news: news)
                 .task {
-                    appDelegate.store = store
+                    // Also saves the push subscriptions, once iCloud answers.
                     await store.refresh(force: true)
-                    await store.prepareNotifications()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
-                        Task { await store.refresh() }
+                        Task {
+                            await store.refresh()
+                            // Feeds older than an hour, so the News badge is current on open.
+                            await news.refresh(maxAge: NewsFetcher.openInterval, preferences: store.alertPreferences)
+                        }
                     case .background:
                         Task { await store.scheduleBackgroundRefresh() }
                     default:

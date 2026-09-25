@@ -108,10 +108,18 @@ enum LocalSources {
 
     // MARK: CLI JSON (Antigravity's agy)
 
-    /// `major.minor.patch` from `--version` output, e.g. "agy 1.1.12 (abc)" → [1, 1, 12].
+    /// `major.minor.patch` from `--version` output, e.g. "agy 1.1.12 (abc)" → [1, 1, 12]. Numbers
+    /// shaped like a date ("2026.09.25", a build stamp) aren't taken for the version.
     static func semanticVersion(in text: String) -> [Int]? {
-        guard let range = text.range(of: #"\d+\.\d+(\.\d+)?"#, options: .regularExpression) else { return nil }
-        return text[range].split(separator: ".").compactMap { Int($0) }
+        var rest = text[...]
+        while let range = rest.range(of: #"(?<![\d.])\d+\.\d+(\.\d+)?(?![\d.])"#, options: .regularExpression) {
+            let parts = rest[range].split(separator: ".").compactMap { Int($0) }
+            if let major = parts.first, major < 1000 {
+                return parts
+            }
+            rest = rest[range.upperBound...]
+        }
+        return nil
     }
 
     static func version(_ version: [Int], isAtLeast minimum: [Int]) -> Bool {

@@ -82,16 +82,7 @@ final class ParserTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let db = folder.appendingPathComponent("state.vscdb")
-        let sqlite = Process()
-        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        sqlite.arguments = [
-            db.path,
-            "CREATE TABLE ItemTable (key TEXT, value TEXT); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', 'tok-test-cursor');",
-        ]
-        try sqlite.run()
-        sqlite.waitUntilExit()
-        XCTAssertEqual(sqlite.terminationStatus, 0)
+        let db = try makeCursorDatabase(in: folder, token: "tok-test-cursor")
 
         let previous = ProcessInfo.processInfo.environment["TOKENROOM_CURSOR_DB"]
         defer {
@@ -104,10 +95,47 @@ final class ParserTests: XCTestCase {
         }
         setenv("TOKENROOM_CURSOR_DB", db.path, 1)
         CredentialReaders.invalidateCaches()
-        XCTAssertEqual(try CredentialReaders.cursorAccessToken(), "tok-test-cursor")
-        XCTAssertTrue(CredentialReaders.hasUsableCursorSession())
+        // The Keychain comes first now; leave this Mac's real Cursor login out of it.
+        XCTAssertEqual(try CredentialReaders.cursorAccessToken(keychain: { _ in nil }, usesCache: false), "tok-test-cursor", "TOKENROOM_CURSOR_DB points at the database")
         XCTAssertNotNil(CredentialReaders.sessionStamp(.cursor))
         XCTAssertNotNil(CredentialReaders.sessionStamp(.grokBot))
+    }
+
+    /// Cursor 3.9 and later keep the token in the Keychain; `state.vscdb` may still hold an older
+    /// one that no longer works, so it's only the fallback.
+    func testCursorKeychainTokenWinsOverTheDatabase() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let db = try makeCursorDatabase(in: folder, token: "tok-test-database")
+
+        var asked: [String] = []
+        let token = try CredentialReaders.cursorAccessToken(keychain: { service in
+            asked.append(service)
+            return "tok-test-keychain"
+        }, database: db, usesCache: false)
+        XCTAssertEqual(token, "tok-test-keychain")
+        XCTAssertEqual(asked, [CredentialReaders.cursorKeychainService])
+
+        XCTAssertEqual(try CredentialReaders.cursorAccessToken(keychain: { _ in nil }, database: db, usesCache: false), "tok-test-database")
+        XCTAssertEqual(try CredentialReaders.cursorAccessToken(keychain: { _ in "" }, database: db, usesCache: false), "tok-test-database", "An empty Keychain item doesn't count")
+        XCTAssertThrowsError(try CredentialReaders.cursorAccessToken(keychain: { _ in nil }, database: folder.appendingPathComponent("missing.vscdb"), usesCache: false)) { error in
+            XCTAssertEqual(error as? ProviderError, .signedOut(Provider.cursor.signInHint))
+        }
+    }
+
+    private func makeCursorDatabase(in folder: URL, token: String) throws -> URL {
+        let db = folder.appendingPathComponent("state.vscdb")
+        let sqlite = Process()
+        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqlite.arguments = [
+            db.path,
+            "CREATE TABLE ItemTable (key TEXT, value TEXT); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', '\(token)');",
+        ]
+        try sqlite.run()
+        sqlite.waitUntilExit()
+        XCTAssertEqual(sqlite.terminationStatus, 0)
+        return db
     }
 
     func testMenuBarCollapse() {

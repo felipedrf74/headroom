@@ -15,6 +15,6 @@ Tokenroom is a local macOS extra. It has no account and no server.
 
 ## How to report
 
-Use [GitHub Security Advisories](https://github.com/felipedrf74/headroom/security/advisories/new) on this repository.
+Use [GitHub Security Advisories](https://github.com/felipedrf74/tokenroom/security/advisories/new) on this repository.
 
 Do not open a public issue with tokens, cookies, or session files.

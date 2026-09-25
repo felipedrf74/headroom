@@ -8,6 +8,12 @@ struct TokenroomWatchApp: App {
     var body: some Scene {
         WindowGroup {
             WatchRootView(store: store)
+                .onOpenURL { url in
+                    // Complications and the Smart Stack link to a provider.
+                    if case .provider(let id) = DeepLink(url) {
+                        store.openedProvider = id
+                    }
+                }
                 .task {
                     await store.refresh(force: true)
                 }

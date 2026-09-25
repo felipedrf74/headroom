@@ -112,6 +112,7 @@ enum LocalKeys {
         case "claude-settings": "Key from Claude Code settings"
         case "kimi-cli": "Signed in with the kimi CLI"
         case "opencode": "Key from OpenCode"
+        case "copilot-token": "With your fine-grained token"
         default: nil
         }
     }

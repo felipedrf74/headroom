@@ -13,6 +13,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		D20000000000000000000005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000008 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D10000000000000000000010;
+			remoteInfo = TokenroomMobile;
+		};
 		AA0000000000000000000017 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = AA0000000000000000000008 /* Project object */;
@@ -94,6 +101,8 @@
 		E10000000000000000000001 /* TokenroomWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TokenroomWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF0000000000000000000009 /* Watch.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Watch.xcconfig; sourceTree = "<group>"; };
 		CF000000000000000000000A /* WatchWidgets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = WatchWidgets.xcconfig; sourceTree = "<group>"; };
+		CF000000000000000000000B /* MobileTests.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MobileTests.xcconfig; sourceTree = "<group>"; };
+		D20000000000000000000001 /* TokenroomMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TokenroomMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F10000000000000000000001 /* TokenroomWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TokenroomWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F20000000000000000000001 /* TokenroomWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TokenroomWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -130,6 +139,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		D20000000000000000000002 /* TokenroomMobileTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TokenroomMobileTests;
+			sourceTree = "<group>";
+		};
 		AA0000000000000000000006 /* Tokenroom */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Tokenroom;
@@ -200,6 +214,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		D20000000000000000000012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AA0000000000000000000011 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -253,6 +274,7 @@
 				AA0000000000000000000006 /* Tokenroom */,
 				AA0000000000000000000007 /* TokenroomTests */,
 				D10000000000000000000002 /* TokenroomMobile */,
+				D20000000000000000000002 /* TokenroomMobileTests */,
 				E10000000000000000000002 /* TokenroomWidgets */,
 				F10000000000000000000002 /* TokenroomWatch */,
 				F20000000000000000000002 /* TokenroomWatchWidgets */,
@@ -266,6 +288,7 @@
 				AA0000000000000000000004 /* Tokenroom.app */,
 				AA0000000000000000000005 /* TokenroomTests.xctest */,
 				D10000000000000000000001 /* TokenroomMobile.app */,
+				D20000000000000000000001 /* TokenroomMobileTests.xctest */,
 				E10000000000000000000001 /* TokenroomWidgets.appex */,
 				F10000000000000000000001 /* TokenroomWatch.app */,
 				F20000000000000000000001 /* TokenroomWatchWidgets.appex */,
@@ -285,6 +308,7 @@
 				CF0000000000000000000008 /* Widgets.xcconfig */,
 				CF0000000000000000000009 /* Watch.xcconfig */,
 				CF000000000000000000000A /* WatchWidgets.xcconfig */,
+				CF000000000000000000000B /* MobileTests.xcconfig */,
 				CF0000000000000000000006 /* Local.xcconfig.example */,
 			);
 			path = Config;
@@ -305,6 +329,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		D20000000000000000000010 /* TokenroomMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D20000000000000000000020 /* Build configuration list for PBXNativeTarget "TokenroomMobileTests" */;
+			buildPhases = (
+				D20000000000000000000011 /* Sources */,
+				D20000000000000000000012 /* Frameworks */,
+				D20000000000000000000013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D20000000000000000000006 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D20000000000000000000002 /* TokenroomMobileTests */,
+			);
+			name = TokenroomMobileTests;
+			productName = TokenroomMobileTests;
+			productReference = D20000000000000000000001 /* TokenroomMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		AA0000000000000000000002 /* Tokenroom */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = BB0000000000000000000002 /* Build configuration list for PBXNativeTarget "Tokenroom" */;
@@ -472,6 +517,10 @@
 					D10000000000000000000010 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					D20000000000000000000010 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D10000000000000000000010;
+					};
 					E10000000000000000000010 = {
 						CreatedOnToolsVersion = 27.0;
 					};
@@ -500,6 +549,7 @@
 				AA0000000000000000000002 /* Tokenroom */,
 				AA0000000000000000000003 /* TokenroomTests */,
 				D10000000000000000000010 /* TokenroomMobile */,
+				D20000000000000000000010 /* TokenroomMobileTests */,
 				E10000000000000000000010 /* TokenroomWidgets */,
 				F10000000000000000000010 /* TokenroomWatch */,
 				F20000000000000000000010 /* TokenroomWatchWidgets */,
@@ -508,6 +558,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		D20000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AA0000000000000000000013 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -553,6 +610,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		D20000000000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AA0000000000000000000012 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -598,6 +662,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		D20000000000000000000006 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D10000000000000000000010 /* TokenroomMobile */;
+			targetProxy = D20000000000000000000005 /* PBXContainerItemProxy */;
+		};
 		AA0000000000000000000018 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = AA0000000000000000000002 /* Tokenroom */;
@@ -621,6 +690,20 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		D20000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF000000000000000000000B /* MobileTests.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		D20000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF000000000000000000000B /* MobileTests.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
 		CC0000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CF0000000000000000000001 /* Base.xcconfig */;
@@ -800,6 +883,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		D20000000000000000000020 /* Build configuration list for PBXNativeTarget "TokenroomMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D20000000000000000000021 /* Debug */,
+				D20000000000000000000022 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		BB0000000000000000000001 /* Build configuration list for PBXProject "Tokenroom" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

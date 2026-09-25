@@ -350,17 +350,22 @@ enum CredentialReaders {
         (try? cursorAccessToken()) != nil
     }
 
-    static func cursorAccessToken() throws -> String {
-        if let cached = cursorCache.withLock({ $0 }), Date().timeIntervalSince(cached.readAt) < 20 {
+    /// Cursor's token: the Keychain first (Cursor 3.9 and later keep it there), then the older
+    /// `state.vscdb`, which may still hold a token from before the move that no longer works.
+    static func cursorAccessToken(
+        keychain: (String) -> String? = { keychainPassword(service: $0, promptAllowed: false) },
+        database: URL = cursorDatabaseURL,
+        usesCache: Bool = true
+    ) throws -> String {
+        if usesCache, let cached = cursorCache.withLock({ $0 }), Date().timeIntervalSince(cached.readAt) < 20 {
             return cached.token
         }
-        if let token = LocalSources.vscodeState("cursorAuth/accessToken", database: cursorDatabaseURL) {
-            cursorCache.withLock { $0 = (token, Date()) }
+        if let token = keychain(cursorKeychainService), !token.isEmpty {
+            if usesCache { cursorCache.withLock { $0 = (token, Date()) } }
             return token
         }
-        // Cursor 3.9 and later keep the token in the Keychain instead.
-        if let token = keychainPassword(service: cursorKeychainService, promptAllowed: false), !token.isEmpty {
-            cursorCache.withLock { $0 = (token, Date()) }
+        if let token = LocalSources.vscodeState("cursorAuth/accessToken", database: database) {
+            if usesCache { cursorCache.withLock { $0 = (token, Date()) } }
             return token
         }
         throw ProviderError.signedOut(Provider.cursor.signInHint)
@@ -377,7 +382,7 @@ enum CredentialReaders {
 
     /// - Parameter promptAllowed: false fails quietly instead of asking for Keychain access,
     ///   for items another app owns that are polled every refresh.
-    private static func keychainPassword(service: String, account: String? = nil, promptAllowed: Bool = true) -> String? {
+    static func keychainPassword(service: String, account: String? = nil, promptAllowed: Bool = true) -> String? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

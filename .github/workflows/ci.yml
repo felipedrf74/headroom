@@ -44,5 +44,12 @@ jobs:
           xcodebuild build -project Tokenroom.xcodeproj -scheme TokenroomMobile
           -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
 
+      # Compiles the iPhone tests. Running them needs a signed host (iCloud, App Group, and
+      # Keychain entitlements), which an unsigned runner build doesn't have.
+      - name: iPhone tests compile
+        run: >
+          xcodebuild build-for-testing -project Tokenroom.xcodeproj -scheme TokenroomMobile
+          -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO TOKENROOM_CK_CONTAINER=
+
       - name: Command Line Tools build
         run: TOKENROOM_FORCE_SWIFTC=1 ./scripts/build.sh

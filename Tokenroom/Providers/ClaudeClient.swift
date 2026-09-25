@@ -106,24 +106,76 @@ enum ClaudeParser {
 struct ClaudeClient: ProviderClient {
     var provider: Provider { .claude }
     var bridge: ClaudeStatusLineBridge = .standard
+    /// The last direct reading and any Retry-After, shared by copies of this client.
+    let state = ClaudeClientState()
 
-    /// The direct usage read, merged with Claude Code's status line when that is newer. When the
-    /// direct read can't happen (expired, rate limited, offline), the status line alone answers.
+    /// A status-line reading this recent answers without calling Claude's endpoint.
+    static let bridgeFreshness: TimeInterval = 5 * 60
+    /// Older status-line readings are ignored: Claude may have been used elsewhere since.
+    static let bridgeMaxAge: TimeInterval = 6 * 3600
+    /// How long a direct reading's other windows (Opus, Sonnet, extra usage) keep being shown
+    /// next to newer status-line readings.
+    static let directReuse: TimeInterval = 30 * 60
+
+    /// Claude Code's status line when it's fresh, else the direct usage read merged with it. When
+    /// the direct read can't happen (expired, rate limited, offline), the status line answers,
+    /// keeping the other windows from the last direct read.
     func fetch() async -> Result<QuotaSnapshot, ProviderError> {
-        let bridge = self.bridge
-        let reading = await BlockingIO.run { bridge.reading() }
+        let now = Date()
+        let reading = await currentReading(now: now)
+        let last = state.lastDirect
+        if let reading, now.timeIntervalSince(reading.at) < Self.bridgeFreshness,
+           let last, now.timeIntervalSince(last.fetchedAt) < Self.directReuse {
+            return .success(Self.merged(last, with: reading, now: now))
+        }
+        if let blocked = state.blockedUntil, blocked > now {
+            // Claude asked to wait; the status line still counts meanwhile.
+            if let answer = Self.combined(last, reading, now: now) {
+                return .success(answer)
+            }
+            return .failure(.rateLimited(until: blocked))
+        }
         do {
             let direct = try await directUsage()
-            return .success(Self.merged(direct, with: reading))
+            state.recordDirect(direct)
+            return .success(Self.merged(direct, with: reading, now: now))
         } catch {
-            if let fallback = reading?.snapshot() {
-                return .success(fallback)
+            let failure = error as? ProviderError ?? .unreachable
+            if case .rateLimited(let until) = failure {
+                state.block(until: ProviderStatus.clampedRetry(until, now: now))
             }
-            return .failure(error as? ProviderError ?? .unreachable)
+            if let answer = Self.combined(last, reading, now: now) {
+                return .success(answer)
+            }
+            return .failure(failure)
         }
     }
 
-    /// Weekly and session readings from the status line replace older direct ones.
+    /// Between direct reads (at most every 5 minutes), a newer status-line reading still updates
+    /// the weekly and session windows.
+    func fetchBetweenCalls(previous: QuotaSnapshot?) async -> QuotaSnapshot? {
+        let now = Date()
+        guard let reading = await currentReading(now: now), reading.at > (previous?.fetchedAt ?? .distantPast) else { return nil }
+        return Self.combined(previous ?? state.lastDirect, reading, now: now)
+    }
+
+    private func currentReading(now: Date) async -> ClaudeBridgeReading? {
+        let bridge = self.bridge
+        guard let reading = await BlockingIO.run({ bridge.reading() }),
+              now.timeIntervalSince(reading.at) < Self.bridgeMaxAge
+        else { return nil }
+        return reading
+    }
+
+    /// The last direct reading with newer status-line values, or the status line alone.
+    static func combined(_ direct: QuotaSnapshot?, _ reading: ClaudeBridgeReading?, now: Date = .now) -> QuotaSnapshot? {
+        guard let reading else { return nil }
+        guard let direct else { return reading.snapshot(now: now) }
+        return merged(direct, with: reading, now: now)
+    }
+
+    /// Weekly and session readings from the status line replace older direct ones; the direct
+    /// read's other windows stay.
     static func merged(_ direct: QuotaSnapshot, with reading: ClaudeBridgeReading?, now: Date = .now) -> QuotaSnapshot {
         guard let reading, reading.at > direct.fetchedAt, let fresh = reading.snapshot(now: now) else { return direct }
         var merged = direct
@@ -131,12 +183,16 @@ struct ClaudeClient: ProviderClient {
             if let index = merged.windows.firstIndex(where: { $0.id == window.id }) {
                 merged.windows[index].usedPercent = window.usedPercent
                 merged.windows[index].resetsAt = window.resetsAt ?? merged.windows[index].resetsAt
+            } else {
+                merged.windows.append(window)
             }
         }
         if let weekly = merged.windows.first(where: { $0.id == "weekly" }) {
             merged.usedPercent = weekly.usedPercent
             merged.resetsAt = weekly.resetsAt
         }
+        merged.fetchedAt = reading.at
+        merged.source = "bridge"
         return merged
     }
 
@@ -173,5 +229,31 @@ struct ClaudeClient: ProviderClient {
             provider: .claude
         )
         return try ClaudeParser.snapshot(from: data)
+    }
+}
+
+/// What `ClaudeClient` remembers between checks. Copies of the client share one.
+final class ClaudeClientState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lastDirect: QuotaSnapshot?
+    private var _blockedUntil: Date?
+
+    var lastDirect: QuotaSnapshot? {
+        lock.withLock { _lastDirect }
+    }
+
+    var blockedUntil: Date? {
+        lock.withLock { _blockedUntil }
+    }
+
+    func recordDirect(_ snapshot: QuotaSnapshot) {
+        lock.withLock {
+            _lastDirect = snapshot
+            _blockedUntil = nil
+        }
+    }
+
+    func block(until date: Date) {
+        lock.withLock { _blockedUntil = date }
     }
 }

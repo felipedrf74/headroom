@@ -17,6 +17,7 @@ enum UsageRanking {
             startsAt: window.startsAt,
             windowSeconds: window.periodSec,
             samples: history?.points ?? [],
+            measured: window.pace,
             isStale: isStale,
             now: now
         )

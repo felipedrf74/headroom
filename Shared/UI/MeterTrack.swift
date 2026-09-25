@@ -36,7 +36,11 @@ struct MeterTrack: View {
                     }
                 }
             }
-            .accessibilityHidden(true)
+            // The fill repeats the percent next to it; only the pace tick adds something to hear.
+            .accessibilityElement()
+            .accessibilityHidden(paceMark == nil || isStale)
+            .accessibilityLabel("Even pace")
+            .accessibilityValue(paceMark.map { "\(TokenroomFormat.percentText(min(max($0, 0), 1) * 100)) percent of the window has passed" } ?? "")
     }
 
     private var usageGradient: some ShapeStyle {

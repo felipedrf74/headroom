@@ -128,8 +128,31 @@ protocol ProviderClient: Sendable {
     /// How long a check may take before it counts as unreachable.
     var fetchBudget: TimeInterval { get }
     func fetch() async -> Result<QuotaSnapshot, ProviderError>
+    /// A cheap local reading while the provider's own endpoint is resting between checks, or nil.
+    func fetchBetweenCalls(previous: QuotaSnapshot?) async -> QuotaSnapshot?
 }
 
 extension ProviderClient {
     var fetchBudget: TimeInterval { TokenroomHTTP.fetchBudget }
+
+    /// This check, given up on after its `fetchBudget` (or `budget`, when less time is left), so
+    /// one slow provider never holds up the rest. The Mac's refresh, the iPhone's key providers,
+    /// and widgets all read through it.
+    func fetchWithinBudget(_ budget: TimeInterval? = nil) async -> Result<QuotaSnapshot, ProviderError> {
+        let limit = min(budget ?? fetchBudget, fetchBudget)
+        return await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
+            group.addTask { await self.fetch() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, limit) * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? .failure(.unreachable)
+        }
+    }
+
+    func fetchBetweenCalls(previous: QuotaSnapshot?) async -> QuotaSnapshot? {
+        nil
+    }
 }
