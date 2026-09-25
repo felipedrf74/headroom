@@ -4,6 +4,7 @@ import SwiftUI
 struct PopoverView: View {
     @Bindable var store: QuotaStore
     var onSettings: () -> Void
+    @State private var showsDisconnected = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,9 +26,9 @@ struct PopoverView: View {
                     .padding(.bottom, 8)
             } else {
                 ViewThatFits(in: .vertical) {
-                    cards(providers)
+                    providerList
                     ScrollView {
-                        cards(providers)
+                        providerList
                     }
                 }
                 .frame(maxHeight: 520)
@@ -43,6 +44,34 @@ struct PopoverView: View {
         }
         .frame(width: TokenroomTokens.popoverWidth)
         .transaction { $0.animation = nil }
+    }
+
+    private var providerList: some View {
+        VStack(spacing: TokenroomTokens.cardGap) {
+            cards(store.connectedProviders)
+            let disconnected = store.disconnectedProviders
+            if !disconnected.isEmpty {
+                Button {
+                    showsDisconnected.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: showsDisconnected ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Not connected (\(disconnected.count))")
+                        Spacer()
+                    }
+                    .font(.system(size: TokenroomTokens.captionSize, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, TokenroomTokens.cardPadding)
+                .accessibilityLabel("Not connected, \(disconnected.count) providers")
+                if showsDisconnected {
+                    cards(disconnected)
+                }
+            }
+        }
     }
 
     private func cards(_ providers: [Provider]) -> some View {

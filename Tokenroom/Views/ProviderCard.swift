@@ -112,13 +112,19 @@ struct ProviderCard: View {
 
     @ViewBuilder
     private func snapshotBlock(_ snapshot: QuotaSnapshot, stale: Bool) -> some View {
-        header(percent: snapshot.usedPercent, remaining: snapshot.remainingPercent, stale: stale)
-        MeterTrack(
-            usedPercent: snapshot.usedPercent,
-            remaining: snapshot.remainingPercent,
-            isStale: stale
-        )
-        caption(primaryCaption(snapshot))
+        if let primary = snapshot.windows.first, !primary.isMetered {
+            // A balance with no limit: the amount is the headline, no meter.
+            header(value: primary.amount.flatMap(Self.amountHeadline), remaining: 100, stale: stale)
+            caption(primary.title)
+        } else {
+            header(percent: snapshot.usedPercent, remaining: snapshot.remainingPercent, stale: stale)
+            MeterTrack(
+                usedPercent: snapshot.usedPercent,
+                remaining: snapshot.remainingPercent,
+                isStale: stale
+            )
+            caption(primaryCaption(snapshot))
+        }
         if !stale, let pace, pace.verdict == .ahead || pace.verdict == .limitReached {
             Text(pace.caption())
                 .font(.system(size: TokenroomTokens.captionSize, weight: .medium))
@@ -127,6 +133,15 @@ struct ProviderCard: View {
         }
         ForEach(extraWindows(snapshot)) { window in
             caption(windowCaption(window))
+        }
+        if snapshot.source == "bridge" {
+            caption("via Claude Code · \(RelativeTime.ago(snapshot.fetchedAt))")
+        }
+        if let banked = snapshot.banked {
+            caption(Self.bankedText(banked))
+        }
+        if let extra = snapshot.extra, let text = Self.extraText(extra) {
+            caption(text)
         }
         if let plan = snapshot.planLabel, plan != snapshot.primaryTitle {
             caption(plan)
@@ -137,16 +152,39 @@ struct ProviderCard: View {
     }
 
     private func header(percent: Double?, remaining: Double, stale: Bool) -> some View {
+        header(value: percent.map { "\(QuotaStore.percentText($0))%" }, remaining: remaining, stale: stale)
+    }
+
+    /// "$12.40 left" for balances, "$3.10 spent" when only spend is known.
+    static func amountHeadline(_ amount: QuotaAmount) -> String? {
+        if let remaining = amount.remainingOrComputed {
+            return AmountFormat.text(remaining, unit: amount.unit)
+        }
+        return amount.used.map { "\(AmountFormat.text($0, unit: amount.unit)) spent" }
+    }
+
+    private func header(value: String?, remaining: Double, stale: Bool) -> some View {
         HStack(alignment: .center, spacing: 10) {
             ProviderIcon(provider: provider, size: 28)
             Text(provider.displayName)
                 .font(.system(size: TokenroomTokens.popoverNameSize, weight: .semibold))
                 .foregroundStyle(stale ? Color.secondary.opacity(TokenroomTokens.staleOpacity) : Color.primary)
             Spacer(minLength: 8)
-            Text(percent.map { "\(QuotaStore.percentText($0))%" } ?? "—")
+            Text(value ?? "—")
                 .font(.system(size: TokenroomTokens.popoverPercentSize, weight: .medium).monospacedDigit())
                 .foregroundStyle(TokenroomTokens.ink(remaining: remaining, isStale: stale))
         }
+    }
+
+    static func bankedText(_ banked: BankedResets, now: Date = .now) -> String {
+        let count = banked.available == 1 ? "1 banked reset" : "\(banked.available) banked resets"
+        guard let next = banked.nextExpiry(after: now) else { return count }
+        return "\(count) · next expires \(next.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    static func extraText(_ extra: ExtraUsage) -> String? {
+        guard extra.isEnabled, let remaining = extra.amount.remainingOrComputed else { return nil }
+        return "\(extra.title) · \(AmountFormat.text(remaining, unit: extra.amount.unit)) left"
     }
 
     private func paceColor(_ severity: Pace.Severity) -> Color {

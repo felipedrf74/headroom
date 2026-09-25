@@ -13,6 +13,8 @@ final class QuotaStore {
     var isRefreshing = false
     var settings: AppSettings
     var showsLegacyNotice: Bool
+    /// Set by "Add Key" in the popover; Settings opens its key sheet and clears it.
+    var pendingKeyProvider: Provider?
     let signIn: SignInCoordinator
     /// Sends readings to iCloud for iPhone and Apple Watch. Nil in tests.
     let relay: RelayPublisher?
@@ -33,7 +35,7 @@ final class QuotaStore {
 
     init(
         settings: AppSettings = AppSettings(),
-        clients: [any ProviderClient] = [GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient()],
+        clients: [any ProviderClient] = QuotaStore.defaultClients,
         cache: SnapshotCache = SnapshotCache(),
         relay: RelayPublisher? = nil,
         showsLegacyNotice: Bool = false
@@ -131,6 +133,7 @@ final class QuotaStore {
             guard settings.isEnabled(provider) else { return false }
             // A provider that answered 429 is left alone until its Retry-After passes.
             if let until = rateLimitedUntil[provider], until > now { return false }
+            if let last = checkedAt[provider], now.timeIntervalSince(last) < provider.minimumInterval { return false }
             return true
         }
         await withTaskGroup(of: (Provider, Result<QuotaSnapshot, ProviderError>).self) { group in
@@ -186,8 +189,13 @@ final class QuotaStore {
                 plan: snapshot?.planLabel,
                 primaryWindowID: snapshot?.windows.first?.id,
                 windows: snapshot?.windows.map {
-                    RelayWindow(id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt, periodSec: $0.windowSeconds, startsAt: $0.startsAt)
-                } ?? []
+                    RelayWindow(
+                        id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt,
+                        periodSec: $0.windowSeconds, startsAt: $0.startsAt, amount: $0.amount, metered: $0.metered
+                    )
+                } ?? [],
+                banked: snapshot?.banked,
+                extra: snapshot?.extra
             )
         }
         return RelayEnvelope(
@@ -226,7 +234,7 @@ final class QuotaStore {
 
     var menuMeters: [MenuMeter] {
         Provider.allCases.compactMap { provider in
-            guard settings.isEnabled(provider) else { return nil }
+            guard settings.isEnabled(provider), settings.showsInMenuBar(provider) else { return nil }
             let status = statuses[provider] ?? .loading
             switch status {
             case .signedOut, .notEntitled, .expired(_, nil), .rateLimited(_, nil), .unreachable(nil):
@@ -242,6 +250,8 @@ final class QuotaStore {
                 )
             case .live(let snapshot), .stale(let snapshot), .unreachable(let snapshot?),
                  .expired(_, let snapshot?), .rateLimited(_, let snapshot?):
+                // A balance with no limit has no percentage to show.
+                guard snapshot.windows.first?.isMetered ?? true else { return nil }
                 return MenuMeter(
                     provider: provider,
                     valueText: Self.percentText(snapshot.usedPercent),
@@ -256,6 +266,25 @@ final class QuotaStore {
 
     var popoverProviders: [Provider] {
         Provider.allCases.filter { settings.isEnabled($0) }
+    }
+
+    /// Enabled providers with a reading (or still loading), shown first.
+    var connectedProviders: [Provider] {
+        popoverProviders.filter { !isDisconnected($0) }
+    }
+
+    /// Enabled providers waiting for a sign-in or key, collapsed at the bottom.
+    var disconnectedProviders: [Provider] {
+        popoverProviders.filter(isDisconnected)
+    }
+
+    private func isDisconnected(_ provider: Provider) -> Bool {
+        switch statuses[provider] ?? .loading {
+        case .signedOut, .notEntitled, .expired(_, nil), .unreachable(nil):
+            true
+        default:
+            false
+        }
     }
 
     func accountCaption(_ provider: Provider) -> String {
@@ -294,6 +323,14 @@ final class QuotaStore {
 
     func quitLegacyApp() {
         LegacyMigration.quitLegacyApp()
+    }
+
+    static var defaultClients: [any ProviderClient] {
+        var clients: [any ProviderClient] = [GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient()]
+        for provider in Provider.allCases where provider.usesAPIKey {
+            clients.append(APIKeyClient(provider: provider, keys: CredentialReaders.apiKeys))
+        }
+        return clients
     }
 
     static func percentText(_ value: Double) -> String {

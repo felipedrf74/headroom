@@ -65,6 +65,11 @@
 			path = UI;
 			sourceTree = "<group>";
 		};
+		5A0000000000000000000004 /* APIKeys */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = APIKeys;
+			sourceTree = "<group>";
+		};
 		D10000000000000000000002 /* TokenroomMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -142,6 +147,7 @@
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
 				5A0000000000000000000003 /* UI */,
+				5A0000000000000000000004 /* APIKeys */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -166,6 +172,7 @@
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
 				5A0000000000000000000003 /* UI */,
+				5A0000000000000000000004 /* APIKeys */,
 			);
 			name = Tokenroom;
 			productName = Tokenroom;
@@ -210,6 +217,7 @@
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
 				5A0000000000000000000003 /* UI */,
+				5A0000000000000000000004 /* APIKeys */,
 			);
 			name = TokenroomMobile;
 			productName = TokenroomMobile;

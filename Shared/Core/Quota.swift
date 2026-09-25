@@ -3,6 +3,8 @@ import Foundation
 enum WindowKind: String, Codable, Sendable {
     case weekly
     case session
+    case daily
+    case monthly
     case billingCycle
     case pool
 
@@ -23,6 +25,14 @@ struct QuotaWindow: Equatable, Codable, Sendable, Identifiable {
     var windowSeconds: Double? = nil
     /// Window start when the provider reports it (e.g. a billing cycle's first day).
     var startsAt: Date? = nil
+    /// Dollars, credits, or requests behind the window, when the provider reports them.
+    var amount: QuotaAmount? = nil
+    /// False for amount-only windows (a balance with no limit): no meter, never in the menu bar.
+    var metered: Bool? = nil
+
+    var isMetered: Bool {
+        metered ?? true
+    }
 
     var remainingPercent: Double {
         max(0, min(100, 100 - usedPercent))
@@ -38,10 +48,47 @@ struct QuotaSnapshot: Equatable, Codable, Sendable {
     var windows: [QuotaWindow]
     /// Plan name the provider reports, e.g. "SuperGrok Heavy".
     var planLabel: String? = nil
+    /// Saved limit resets (e.g. Codex reset credits).
+    var banked: BankedResets? = nil
+    /// Paid usage beyond the plan (e.g. Codex credits, Claude extra usage).
+    var extra: ExtraUsage? = nil
+    /// Where the reading came from when it isn't the provider's usage call, e.g. "bridge"
+    /// for Claude Code's status line.
+    var source: String? = nil
 
     var remainingPercent: Double {
         max(0, min(100, 100 - usedPercent))
     }
+}
+
+/// An amount of money, credits, or requests. Values are in `unit`.
+struct QuotaAmount: Equatable, Codable, Sendable {
+    var used: Double? = nil
+    var limit: Double? = nil
+    var remaining: Double? = nil
+    /// `usd`, `cny`, `credits`, `requests`, `tokens`, or `points`.
+    var unit: String
+
+    var remainingOrComputed: Double? {
+        remaining ?? limit.flatMap { limit in used.map { limit - $0 } }
+    }
+}
+
+/// Resets saved for later: a count, and when each expires (soonest first).
+struct BankedResets: Equatable, Codable, Sendable {
+    var available: Int
+    var expiries: [Date] = []
+
+    func nextExpiry(after now: Date = .now) -> Date? {
+        expiries.filter { $0 > now }.min()
+    }
+}
+
+struct ExtraUsage: Equatable, Codable, Sendable {
+    /// e.g. "Credits", "Extra usage".
+    var title: String
+    var amount: QuotaAmount
+    var isEnabled: Bool = true
 }
 
 enum ProviderError: Error, Equatable, Sendable {

@@ -10,6 +10,14 @@ enum MenuBarLayout {
         .compact
     }
 
+    /// What the extra draws. "Highest only" keeps the most used provider; the tooltip still lists all.
+    static func displayed(_ meters: [MenuMeter], style: MenuBarStyle) -> [MenuMeter] {
+        guard style == .highest else { return meters }
+        let readings = meters.filter { !$0.isPlaceholder }
+        guard let top = readings.max(by: { $0.usedPercent < $1.usedPercent }) ?? meters.first else { return [] }
+        return [top]
+    }
+
     static func compactText(for meters: [MenuMeter]) -> String {
         meters.map { "\($0.provider.shortName) \($0.valueText)%" }.joined(separator: "  ")
     }
@@ -36,7 +44,7 @@ struct MenuBarLabel: View {
                     .font(.system(size: TokenroomTokens.menuPercentSize, weight: .medium))
             } else {
                 HStack(alignment: .center, spacing: columnSpacing) {
-                    ForEach(meters) { meter in
+                    ForEach(MenuBarLayout.displayed(meters, style: style)) { meter in
                         column(meter)
                     }
                 }
@@ -55,7 +63,7 @@ struct MenuBarLabel: View {
     @ViewBuilder
     private func column(_ meter: MenuMeter) -> some View {
         switch style {
-        case .percents:
+        case .percents, .highest:
             percentColumn(meter)
         case .meters:
             meterColumn(meter)

@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import Foundation
 
 /// Tokenroom's records in the user's private CloudKit database, zone "Tokenroom".
@@ -64,6 +65,13 @@ actor CloudRelay {
 
     func accountStatus() async throws -> CKAccountStatus {
         try await container.accountStatus()
+    }
+
+    /// Short, one-way fingerprint of this container's anonymous user ID. Two devices on the same
+    /// iCloud account show the same value; used only in diagnostics, never stored in records.
+    func accountFingerprint() async throws -> String {
+        let id = try await container.userRecordID().recordName
+        return SHA256.hash(data: Data(id.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 
     func publish(sourceID: String, kind: String, label: String, envelope: RelayEnvelope) async throws {

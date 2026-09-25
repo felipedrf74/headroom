@@ -16,6 +16,8 @@ final class SignInCoordinator {
 
     private var job: Task<Void, Never>?
     var onConnected: ((Provider) -> Void)?
+    /// API-key providers are connected in Settings, not by signing in.
+    var onAddKey: ((Provider) -> Void)?
 
     func isWorking(_ provider: Provider) -> Bool {
         if case .running(let active) = phase {
@@ -26,6 +28,10 @@ final class SignInCoordinator {
 
     func signIn(_ provider: Provider) {
         cancel()
+        if provider.usesAPIKey {
+            onAddKey?(provider)
+            return
+        }
         job = Task { [weak self] in
             await self?.run(provider)
         }
@@ -65,6 +71,9 @@ final class SignInCoordinator {
                 return
             }
             Tooling.openApplication(app)
+        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+            phase = .idle
+            return
         case .grok, .claude, .openai:
             guard let executable = Tooling.resolveProviderCLI(provider) else {
                 phase = .needsInstall(provider, tool: provider.installToolName, url: provider.installURL)

@@ -1,0 +1,18 @@
+{
+  "available_count": 2,
+  "total_earned_count": 3,
+  "history_enabled": true,
+  "immediate_reset_purchase_eligible": false,
+  "credits": [
+    { "id": "c1", "title": "Reset", "status": "available", "reset_type": "weekly", "is_supported_by_plan": true,
+      "granted_at": "2026-09-01T00:00:00Z", "expires_at": "2026-10-10T00:00:00Z", "redeemed_at": null, "redeem_started_at": null },
+    { "id": "c2", "title": "Reset", "status": "available", "reset_type": "weekly", "is_supported_by_plan": true,
+      "granted_at": "2026-09-05T00:00:00Z", "expires_at": "2026-10-03T00:00:00Z", "redeemed_at": null, "redeem_started_at": null },
+    { "id": "c3", "title": "Reset", "status": "redeemed", "reset_type": "weekly", "is_supported_by_plan": true,
+      "granted_at": "2026-08-01T00:00:00Z", "expires_at": "2026-10-20T00:00:00Z", "redeemed_at": "2026-08-20T00:00:00Z", "redeem_started_at": null },
+    { "id": "c4", "title": "Reset", "status": "available", "reset_type": "weekly", "is_supported_by_plan": false,
+      "granted_at": "2026-08-01T00:00:00Z", "expires_at": "2026-10-21T00:00:00Z", "redeemed_at": null, "redeem_started_at": null },
+    { "id": "c5", "title": "Reset", "status": "expired", "reset_type": "weekly", "is_supported_by_plan": true,
+      "granted_at": "2026-06-01T00:00:00Z", "expires_at": "2026-07-01T00:00:00Z", "redeemed_at": null, "redeem_started_at": null }
+  ]
+}

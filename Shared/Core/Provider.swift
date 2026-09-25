@@ -8,6 +8,10 @@ enum Provider: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     case claude
     case openai
     case cursor
+    case openrouter
+    case deepseek
+    case moonshot
+    case vercelGateway
 
     var id: String { rawValue }
 
@@ -44,6 +48,23 @@ struct ProviderDescriptor: Sendable {
     var menuGlyphName: String?
     var signInHint: String
     var expiredHint: String
+    /// Checks closer together than this are skipped, even when forced (rate-limited endpoints).
+    var minimumInterval: TimeInterval = 0
+    /// For providers read with a pasted API key.
+    var key: KeySpec? = nil
+}
+
+/// How a provider's API key is entered.
+struct KeySpec: Sendable {
+    var label = "API key"
+    /// Where to create a key.
+    var createURL: URL
+    /// Start of a typical key, shown as a hint.
+    var prefixHint = ""
+    /// Accounts in separate regions, e.g. Moonshot's global and China platforms.
+    var regions: [String] = []
+    /// Org-wide admin or management keys get an extra warning.
+    var isAdmin = false
 }
 
 extension Provider {
@@ -87,7 +108,9 @@ extension Provider {
                 assetName: "ProviderClaude",
                 signInHint: "Sign in with claude login to see usage.",
                 // Claude Code owns its session; Tokenroom never refreshes it.
-                expiredHint: "Session expired. Run claude once to refresh it."
+                expiredHint: "Session expired. Run claude once to refresh it.",
+                // The usage endpoint answers 429 to more than about one call every few minutes.
+                minimumInterval: 5 * 60
             )
         case .openai:
             ProviderDescriptor(
@@ -114,10 +137,60 @@ extension Provider {
                 signInHint: "Sign in to Cursor to see usage.",
                 expiredHint: "Session expired. Sign in to Cursor again."
             )
+        case .openrouter:
+            ProviderDescriptor(
+                displayName: "OpenRouter",
+                shortName: "OpenRouter",
+                letter: "R",
+                monogram: "OR",
+                tintHex: "#6467F2",
+                category: .apiBalance,
+                signInHint: "Add an OpenRouter API key to see usage.",
+                expiredHint: "Couldn't use this OpenRouter key. Add a new one in Settings.",
+                key: KeySpec(createURL: URL(string: "https://openrouter.ai/settings/keys")!, prefixHint: "sk-or-")
+            )
+        case .deepseek:
+            ProviderDescriptor(
+                displayName: "DeepSeek",
+                shortName: "DeepSeek",
+                letter: "D",
+                monogram: "DS",
+                tintHex: "#4D6BFE",
+                category: .apiBalance,
+                signInHint: "Add a DeepSeek API key to see your balance.",
+                expiredHint: "Couldn't use this DeepSeek key. Add a new one in Settings.",
+                key: KeySpec(createURL: URL(string: "https://platform.deepseek.com/api_keys")!, prefixHint: "sk-")
+            )
+        case .moonshot:
+            ProviderDescriptor(
+                displayName: "Moonshot",
+                shortName: "Moonshot",
+                letter: "M",
+                monogram: "MS",
+                tintHex: "#16191E",
+                category: .apiBalance,
+                signInHint: "Add a Moonshot API key to see your balance.",
+                expiredHint: "Couldn't use this Moonshot key. It may belong to the other region.",
+                key: KeySpec(createURL: URL(string: "https://platform.kimi.ai/console/api-keys")!, prefixHint: "sk-", regions: ["Global", "China"])
+            )
+        case .vercelGateway:
+            ProviderDescriptor(
+                displayName: "Vercel AI Gateway",
+                shortName: "Vercel",
+                letter: "V",
+                monogram: "V",
+                tintHex: "#000000",
+                category: .apiBalance,
+                signInHint: "Add an AI Gateway API key to see your credits.",
+                expiredHint: "Couldn't use this AI Gateway key. Add a new one in Settings.",
+                key: KeySpec(createURL: URL(string: "https://vercel.com/dashboard/ai-gateway/api-keys")!)
+            )
         }
     }
 
     var displayName: String { descriptor.displayName }
+    var key: KeySpec? { descriptor.key }
+    var usesAPIKey: Bool { descriptor.key != nil }
     var shortName: String { descriptor.shortName }
     var letter: String { descriptor.letter }
     var monogram: String { descriptor.monogram }
@@ -128,4 +201,5 @@ extension Provider {
     var menuGlyphName: String? { descriptor.menuGlyphName }
     var signInHint: String { descriptor.signInHint }
     var expiredHint: String { descriptor.expiredHint }
+    var minimumInterval: TimeInterval { descriptor.minimumInterval }
 }

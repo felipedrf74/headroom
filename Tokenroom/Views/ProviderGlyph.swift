@@ -35,7 +35,10 @@ struct ProviderGlyph: View {
                         .fill()
                         .padding(size * 0.06)
                 default:
-                    Color.clear
+                    // Providers without a drawn mark get their letter, tinted like the rest.
+                    Text(provider.letter)
+                        .font(.system(size: size * 0.62, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.5)
                 }
             }
         }

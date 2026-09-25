@@ -4,6 +4,8 @@ import ServiceManagement
 enum MenuBarStyle: String, CaseIterable, Identifiable {
     case percents
     case meters
+    /// One glyph and the percent of the most used provider.
+    case highest
 
     var id: String { rawValue }
 
@@ -11,6 +13,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
         switch self {
         case .percents: "Percents"
         case .meters: "Meters"
+        case .highest: "Highest only"
         }
     }
 }
@@ -26,6 +29,11 @@ final class AppSettings {
     }
 
     var menuStyle: MenuBarStyle {
+        didSet { persist() }
+    }
+
+    /// Enabled providers that stay in the popover but out of the menu bar.
+    var hiddenFromMenuBar: Set<Provider> {
         didSet { persist() }
     }
 
@@ -48,6 +56,7 @@ final class AppSettings {
         static let known = "knownProviders"
         static let refreshMinutes = "refreshMinutes"
         static let menuStyle = "menuStyle"
+        static let hiddenFromMenuBar = "menuBarHidden"
     }
 
     static let currentVersion = 2
@@ -64,9 +73,22 @@ final class AppSettings {
         } else {
             menuStyle = .meters
         }
+        hiddenFromMenuBar = Set((defaults.array(forKey: Keys.hiddenFromMenuBar) as? [String] ?? []).compactMap(Provider.init(rawValue:)))
         launchAtLogin = SMAppService.mainApp.status == .enabled
         isReady = true
         persist()
+    }
+
+    func showsInMenuBar(_ provider: Provider) -> Bool {
+        !hiddenFromMenuBar.contains(provider)
+    }
+
+    func setShowsInMenuBar(_ provider: Provider, _ isOn: Bool) {
+        if isOn {
+            hiddenFromMenuBar.remove(provider)
+        } else {
+            hiddenFromMenuBar.insert(provider)
+        }
     }
 
     /// The saved list is authoritative for every provider the saved settings already knew,
@@ -112,6 +134,7 @@ final class AppSettings {
         defaults.set(Provider.allCases.map(\.rawValue).sorted(), forKey: Keys.known)
         defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
         defaults.set(menuStyle.rawValue, forKey: Keys.menuStyle)
+        defaults.set(hiddenFromMenuBar.map(\.rawValue).sorted(), forKey: Keys.hiddenFromMenuBar)
     }
 
     private func applyLaunchAtLogin() {
