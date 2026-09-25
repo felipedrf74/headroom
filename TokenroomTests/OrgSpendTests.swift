@@ -42,7 +42,7 @@ final class OrgSpendTests: XCTestCase {
     func testSpendWithoutLimitIsAnAmount() {
         let window = OrgSpend.spendWindow(312.5, now: now)
         XCTAssertFalse(window.isMetered)
-        XCTAssertEqual(ProviderCard.amountHeadline(window.amount!)?.hasSuffix("spent"), true)
+        XCTAssertEqual(ReadingText.amountHeadline(window.amount!)?.hasSuffix("spent"), true)
     }
 
     // MARK: Budgets

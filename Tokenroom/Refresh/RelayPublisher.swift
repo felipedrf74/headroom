@@ -55,6 +55,7 @@ final class RelayPublisher {
     private let relay: CloudRelay?
     private let defaults: UserDefaults
     private var policy = RelayPublishPolicy()
+    private var preferencesCache: (preferences: AlertPreferences, readAt: Date)?
     private var retryAt: Date?
     private var lastHistoryHour: Date?
     private var loggedAccount = false
@@ -115,6 +116,32 @@ final class RelayPublisher {
             lastHistoryHour = hour
         } catch {
             handle(error, now: now)
+        }
+    }
+
+    /// The iPhone's alert preferences, checked at most every half hour; defaults until it has set any.
+    func alertPreferences(now: Date = .now) async -> AlertPreferences {
+        if let cached = preferencesCache, now.timeIntervalSince(cached.readAt) < 30 * 60 {
+            return cached.preferences
+        }
+        guard let relay, isEnabled, let preferences = try? await relay.alertPreferences() else {
+            return preferencesCache?.preferences ?? AlertPreferences()
+        }
+        preferencesCache = (preferences, now)
+        return preferences
+    }
+
+    /// Sends new alerts to the iPhone. Outside quiet hours, or urgent.
+    func sendAlerts(_ alerts: [UsageAlert], preferences: AlertPreferences, now: Date = .now) async {
+        guard let relay, isEnabled else { return }
+        for alert in alerts where preferences.shouldSend(alert, at: now) {
+            do {
+                try await relay.saveAlert(alert)
+                logger.notice("relay alert sent \(alert.kind.rawValue, privacy: .public) \(alert.level, privacy: .public)")
+            } catch {
+                handle(error, now: now)
+                return
+            }
         }
     }
 

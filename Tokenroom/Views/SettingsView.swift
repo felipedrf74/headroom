@@ -16,6 +16,7 @@ struct SettingsView: View {
             if let relay = store.relay {
                 Form {
                     RelaySettingsSection(relay: relay)
+                    MacAlertsSection(settings: store.settings)
                 }
                 .formStyle(.grouped)
                 .tabItem { Label("iPhone & Watch", systemImage: "iphone.gen3") }
@@ -476,6 +477,36 @@ private struct RelaySettingsSection: View {
             Text("iPhone & Apple Watch")
         } footer: {
             Text("Only percentages, reset times, window labels, plan names, and balances go to your private iCloud. Tokens and keys never leave this Mac.")
+        }
+    }
+}
+
+private struct MacAlertsSection: View {
+    @Bindable var settings: AppSettings
+    @State private var denied = false
+
+    var body: some View {
+        Section {
+            Toggle("Show usage alerts on this Mac", isOn: Binding(
+                get: { settings.showsAlertsOnMac },
+                set: { isOn in
+                    guard isOn else {
+                        settings.showsAlertsOnMac = false
+                        return
+                    }
+                    Task {
+                        let allowed = await MacAlerts.requestPermission()
+                        settings.showsAlertsOnMac = allowed
+                        denied = !allowed
+                    }
+                }
+            ))
+        } header: {
+            Text("Alerts")
+        } footer: {
+            Text(denied
+                ? "Notifications are off for Tokenroom. Turn them on in System Settings › Notifications."
+                : "Alerts at 80% and 95%, when a heavily used window resets, and for banked resets. Your iPhone gets them through iCloud, with its own choices and quiet hours.")
         }
     }
 }
