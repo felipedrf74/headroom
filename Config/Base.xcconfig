@@ -5,6 +5,10 @@
 TOKENROOM_BUNDLE_PREFIX = app.tokenroom
 TOKENROOM_TEAM_ID =
 
+// iCloud container and App Group derive from the prefix. A fork on another team changes the prefix.
+TOKENROOM_CK_CONTAINER = iCloud.$(TOKENROOM_BUNDLE_PREFIX)
+TOKENROOM_APP_GROUP = group.$(TOKENROOM_BUNDLE_PREFIX)
+
 DEVELOPMENT_TEAM = $(TOKENROOM_TEAM_ID)
 SWIFT_VERSION = 6.0
 // Shared/ code compiles into several targets; keep isolation identical everywhere.

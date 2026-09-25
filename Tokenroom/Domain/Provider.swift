@@ -48,6 +48,28 @@ enum Provider: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
         }
     }
 
+    /// Letters for the monogram mark the iPhone and Watch draw (they don't ship brand logos).
+    var monogram: String {
+        switch self {
+        case .grok: "G"
+        case .grokBot: "GB"
+        case .claude: "C"
+        case .openai: "O"
+        case .cursor: "Cu"
+        }
+    }
+
+    /// Tint for the monogram mark, `#RRGGBB`.
+    var tintHex: String {
+        switch self {
+        case .grok: "#8E8E93"
+        case .grokBot: "#5E5CE6"
+        case .claude: "#D97757"
+        case .openai: "#10A37F"
+        case .cursor: "#636366"
+        }
+    }
+
     var assetName: String {
         switch self {
         case .grok: "ProviderBuild"

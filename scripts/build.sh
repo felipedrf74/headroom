@@ -77,7 +77,7 @@ build_with_xcode() {
   local app="$DERIVED/Build/Products/$CONFIG/$APP_NAME.app"
   codesign --verify --strict "$app"
   local authority
-  authority="$(codesign -dv "$app" 2>&1 | awk -F= '/^Authority/ { print $2; exit }')"
+  authority="$(codesign -dvv "$app" 2>&1 | awk -F= '/^Authority/ && !found { print $2; found = 1 }')"
   echo "Signature OK (${authority:-ad-hoc})"
   install_app "$app"
 }

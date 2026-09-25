@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         LegacyMigration.runIfNeeded()
         store = QuotaStore(
             settings: AppSettings(detectsSession: { CredentialReaders.hasSession($0) }),
+            relay: RelayPublisher(),
             showsLegacyNotice: LegacyMigration.shouldShowNotice()
         )
         super.init()

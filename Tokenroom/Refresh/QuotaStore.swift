@@ -14,6 +14,8 @@ final class QuotaStore {
     var settings: AppSettings
     var showsLegacyNotice: Bool
     let signIn: SignInCoordinator
+    /// Sends readings to iCloud for iPhone and Apple Watch. Nil in tests.
+    let relay: RelayPublisher?
 
     /// How long an expired session keeps showing its last reading (faded).
     static let expiredGrace: TimeInterval = 24 * 60 * 60
@@ -31,11 +33,13 @@ final class QuotaStore {
         settings: AppSettings = AppSettings(),
         clients: [any ProviderClient] = [GrokClient(), GrokBotClient(), ClaudeClient(), OpenAIClient(), CursorClient()],
         cache: SnapshotCache = SnapshotCache(),
+        relay: RelayPublisher? = nil,
         showsLegacyNotice: Bool = false
     ) {
         self.settings = settings
         self.clients = Dictionary(uniqueKeysWithValues: clients.map { ($0.provider, $0) })
         self.cache = cache
+        self.relay = relay
         self.showsLegacyNotice = showsLegacyNotice
         self.signIn = SignInCoordinator()
         let cached = cache.load()
@@ -57,6 +61,10 @@ final class QuotaStore {
         guard loopTask == nil else { return }
         loopTask = Task { [weak self] in
             await self?.refresh(force: true)
+            // `-TokenroomSendTestAlert YES` sends one test alert to the iPhone after launch.
+            if UserDefaults.standard.bool(forKey: "TokenroomSendTestAlert") {
+                await self?.relay?.sendTestAlert()
+            }
             while !Task.isCancelled {
                 guard let self else { return }
                 let nanoseconds = UInt64(max(self.settings.refreshInterval, 60) * 1_000_000_000)
@@ -135,6 +143,63 @@ final class QuotaStore {
         }
         persistLiveSnapshots()
         isRefreshing = false
+        await relay?.publish(relayEnvelope(at: now))
+    }
+
+    /// Enabled providers as the iPhone and Watch will see them.
+    func relayEnvelope(at now: Date) -> RelayEnvelope {
+        let providers = Provider.allCases.filter { settings.isEnabled($0) }.map { provider in
+            let status = statuses[provider] ?? .loading
+            let snapshot = status.snapshot
+            return RelayProvider(
+                id: provider.rawValue,
+                name: provider.displayName,
+                shortName: provider.shortName,
+                monogram: provider.monogram,
+                tint: provider.tintHex,
+                state: Self.relayState(status),
+                message: Self.relayMessage(status, provider: provider),
+                checkedAt: checkedAt[provider],
+                fetchedAt: snapshot?.fetchedAt,
+                plan: snapshot?.planLabel,
+                primaryWindowID: snapshot?.windows.first?.id,
+                windows: snapshot?.windows.map {
+                    RelayWindow(id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt)
+                } ?? []
+            )
+        }
+        return RelayEnvelope(
+            producer: "mac",
+            appVersion: TokenroomIdentity.version,
+            checkedAt: now,
+            providers: providers
+        )
+    }
+
+    private static func relayState(_ status: ProviderStatus) -> String {
+        switch status {
+        case .loading: "loading"
+        case .live: "live"
+        case .stale: "stale"
+        case .signedOut: "signedOut"
+        case .expired: "expired"
+        case .notEntitled: "notEntitled"
+        case .rateLimited: "rateLimited"
+        case .unreachable: "unreachable"
+        }
+    }
+
+    private static func relayMessage(_ status: ProviderStatus, provider: Provider) -> String? {
+        switch status {
+        case .signedOut(let hint), .expired(let hint, _), .notEntitled(let hint):
+            hint
+        case .rateLimited(let until, _):
+            "Couldn't refresh. \(provider.displayName) asked to wait until \(until.formatted(date: .omitted, time: .shortened))."
+        case .unreachable:
+            "Couldn't reach \(provider.displayName)."
+        case .loading, .live, .stale:
+            nil
+        }
     }
 
     var menuMeters: [MenuMeter] {

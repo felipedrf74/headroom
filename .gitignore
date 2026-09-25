@@ -21,3 +21,4 @@ secrets/
 
 # Machine-specific build settings (team ID, signing mode)
 Config/Local.xcconfig
+build/
