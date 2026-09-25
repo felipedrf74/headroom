@@ -19,6 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.signIn.onAddKey = { [weak self] provider in
+            self?.store.pendingKeyProvider = provider
+            self?.openSettings()
+        }
         store.start()
         statusItem = StatusItemController(store: store) { [weak self] in
             self?.openSettings()
@@ -47,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let window = NSWindow(contentViewController: hosting)
             window.title = "Tokenroom Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 400, height: 560))
+            window.setContentSize(NSSize(width: 480, height: 600))
             window.isReleasedWhenClosed = false
             window.hidesOnDeactivate = false
             window.delegate = self

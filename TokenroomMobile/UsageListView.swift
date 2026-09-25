@@ -90,13 +90,15 @@ private struct ProviderRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Text(provider.primaryWindow.map { "\(Int($0.used.rounded()))%" } ?? "—")
+                Text(headline)
                     .font(.system(.title, design: .rounded, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(TokenroomTokens.ink(remaining: 100 - (provider.primaryWindow?.used ?? 0), isStale: !isLive))
             }
             if let window = provider.primaryWindow {
-                MeterTrack(usedPercent: window.used, remaining: 100 - window.used, isStale: !isLive)
+                if window.metered ?? true {
+                    MeterTrack(usedPercent: window.used, remaining: 100 - window.used, isStale: !isLive)
+                }
                 Text(caption(for: window))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -114,6 +116,18 @@ private struct ProviderRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+    }
+
+    /// Used % for metered windows; the amount for balances without a limit.
+    private var headline: String {
+        guard let window = provider.primaryWindow else { return "—" }
+        if window.metered == false, let amount = window.amount {
+            if let remaining = amount.remainingOrComputed {
+                return AmountFormat.text(remaining, unit: amount.unit)
+            }
+            return amount.used.map { AmountFormat.text($0, unit: amount.unit) } ?? "—"
+        }
+        return "\(Int(window.used.rounded()))%"
     }
 
     private func caption(for window: RelayWindow) -> String {

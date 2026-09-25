@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import os
 import Security
 import SQLite3
@@ -118,6 +119,9 @@ enum CredentialReaders {
         }
     }
 
+    /// Keys pasted in Settings on this Mac.
+    static let apiKeys = APIKeyStore()
+
     static func sessionStamp(_ provider: Provider) -> String? {
         switch provider {
         case .grok:
@@ -137,6 +141,8 @@ enum CredentialReaders {
             guard let raw = readClaudeRawFromKeychain() else { return nil }
             let checksum = raw.utf8.reduce(into: 0) { sum, byte in sum = sum &+ Int(byte) }
             return "\(raw.count)-\(checksum)"
+        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+            return apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
         }
     }
 
@@ -428,7 +434,9 @@ enum CredentialReaders {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         if !promptAllowed {
-            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
         }
         if let account {
             query[kSecAttrAccount as String] = account

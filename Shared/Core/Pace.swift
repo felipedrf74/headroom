@@ -120,9 +120,11 @@ struct Pace: Equatable, Sendable {
         switch kind {
         case .session:
             return 5 * 3_600
+        case .daily:
+            return 86_400
         case .weekly:
             return 7 * 86_400
-        case .billingCycle:
+        case .monthly, .billingCycle:
             guard let previous = calendar.date(byAdding: .month, value: -1, to: resetsAt) else { return nil }
             return resetsAt.timeIntervalSince(previous)
         case .pool:

@@ -9,7 +9,7 @@ struct TokenroomApp: App {
         // Settings can be opened from the popover.
         Settings {
             SettingsView(store: appDelegate.store)
-                .frame(width: 400)
+                .frame(width: 480)
         }
         .windowResizability(.contentSize)
     }

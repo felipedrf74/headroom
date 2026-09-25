@@ -3,6 +3,8 @@ import Foundation
 enum WindowKind: String, Codable, Sendable {
     case weekly
     case session
+    case daily
+    case monthly
     case billingCycle
     case pool
 

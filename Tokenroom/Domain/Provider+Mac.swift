@@ -11,7 +11,8 @@ struct ProviderLogin: Sendable {
 }
 
 extension Provider {
-    var login: ProviderLogin {
+    /// Nil for providers read with a pasted API key.
+    var login: ProviderLogin? {
         switch self {
         case .grok:
             ProviderLogin(
@@ -52,16 +53,18 @@ extension Provider {
                 appBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
                 appNames: ["Cursor"]
             )
+        case .openrouter, .deepseek, .moonshot, .vercelGateway:
+            nil
         }
     }
 
-    var signInTitle: String { "Sign In" }
-    var cliExecutable: String? { login.cliExecutable }
-    var loginArguments: [String] { login.loginArguments }
-    var installToolName: String { login.installToolName }
-    var installURL: URL { login.installURL }
-    var appBundleIdentifiers: [String] { login.appBundleIdentifiers }
-    var appNames: [String] { login.appNames }
+    var signInTitle: String { usesAPIKey ? "Add Key" : "Sign In" }
+    var cliExecutable: String? { login?.cliExecutable }
+    var loginArguments: [String] { login?.loginArguments ?? [] }
+    var installToolName: String { login?.installToolName ?? displayName }
+    var installURL: URL { login?.installURL ?? key?.createURL ?? TokenroomIdentity.repositoryURL }
+    var appBundleIdentifiers: [String] { login?.appBundleIdentifiers ?? [] }
+    var appNames: [String] { login?.appNames ?? [] }
 }
 
 struct MenuMeter: Equatable, Identifiable, Sendable {
