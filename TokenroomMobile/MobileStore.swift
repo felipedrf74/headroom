@@ -1,6 +1,8 @@
+import BackgroundTasks
 import CloudKit
 import Foundation
 import Observation
+import WidgetKit
 import os
 
 /// Everything the iPhone shows: readings your Macs relay through iCloud, providers read with keys
@@ -30,8 +32,11 @@ final class MobileStore {
 
         var id: String { provider.id }
 
-        var primaryHistory: UsageHistory? {
-            provider.primaryWindow.flatMap { history[$0.id] }
+        init(_ item: ReadingCache.Item, now: Date = .now) {
+            provider = item.provider
+            source = item.source
+            history = item.history
+            pace = ReadingAssembler.pace(for: item, now: now)
         }
     }
 
@@ -46,6 +51,9 @@ final class MobileStore {
     static let localLabel = "This iPhone"
     /// Coming back to the app refreshes once this much time has passed.
     static let foregroundInterval: TimeInterval = 60
+    static let backgroundTaskID = "app.tokenroom.refresh"
+    /// How often to ask iOS for a background refresh. iOS decides when it actually runs.
+    static let backgroundInterval: TimeInterval = 30 * 60
 
     private(set) var relayPhase: RelayPhase = .idle
     /// Other collectors' records; this iPhone's own record is left out.
@@ -86,7 +94,7 @@ final class MobileStore {
     private let logger = Logger(subsystem: TokenroomIdentity.bundleID, category: "store")
 
     init(
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = AppGroup.defaults,
         containerIdentifier: String? = RelayAvailability.containerIdentifier,
         keys: APIKeyStore = APIKeyStore(accessGroup: AppGroup.keychainGroup),
         directory: URL? = AppGroup.containerURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -105,6 +113,12 @@ final class MobileStore {
         cacheURL = directory?.appendingPathComponent(ReadingCache.fileName)
         sampleMode = defaults.bool(forKey: Keys.sampleMode)
         hasOnboarded = defaults.bool(forKey: Keys.onboarded)
+        #if DEBUG
+        // Launch arguments (`-sampleMode YES`) land in the standard defaults, not the App Group's.
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        if let sample = arguments[Keys.sampleMode] as? String { sampleMode = sample == "YES" }
+        if let onboarded = arguments[Keys.onboarded] as? String { hasOnboarded = onboarded == "YES" }
+        #endif
         showCachedReadings()
     }
 
@@ -221,18 +235,14 @@ final class MobileStore {
             return
         }
         guard let cacheURL, let cache = ReadingCache.load(from: cacheURL), !cache.isSample else { return }
-        readings = cache.items.map { item in
-            Reading(provider: item.provider, source: item.source, history: item.history, pace: nil)
-        }
+        readings = cache.items.map { Reading($0) }
+        lastCacheHash = cache.materialHash
     }
 
     private func rebuild(now: Date = .now) {
         if sampleMode {
             let cache = SampleData.cache(now: now)
-            readings = cache.items.map { item in
-                Reading(provider: item.provider, source: item.source, history: item.history,
-                        pace: UsageRanking.pace(for: item.provider, history: item.provider.primaryWindowID.flatMap { item.history[$0] }, now: now))
-            }
+            readings = cache.items.map { Reading($0, now: now) }
             disconnected = []
             saveCache(cache)
             return
@@ -241,53 +251,31 @@ final class MobileStore {
         var sources = relaySources.compactMap { source in
             source.envelope.map { RelayMerge.Source(id: source.id, label: source.label, envelope: $0) }
         }
+        var histories = relayHistories
         if !localStatuses.isEmpty {
             sources.append(RelayMerge.Source(id: sourceID, label: Self.localLabel, envelope: localEnvelope(now: now)))
+            histories[sourceID] = RelayHistory(series: history.weeks)
         }
-        let all = RelayMerge.entries(from: sources, now: now).map { entry in
-            let history = histories(for: entry)
-            return Reading(
-                provider: entry.provider,
-                source: entry.sourceLabel,
-                history: history,
-                pace: UsageRanking.pace(for: entry.provider, history: entry.provider.primaryWindowID.flatMap { history[$0] }, now: now)
-            )
-        }
-        readings = UsageRanking.sorted(all.filter { !$0.provider.isDisconnected }, provider: \.provider, pace: \.pace)
-        disconnected = all.filter(\.provider.isDisconnected).sorted { $0.provider.name < $1.provider.name }
-        saveCache(ReadingCache(
-            savedAt: now,
-            isSample: false,
-            items: readings.map { ReadingCache.Item(provider: $0.provider, source: $0.source, history: $0.history) }
-        ))
+        let output = ReadingAssembler.assemble(sources: sources, histories: histories, now: now)
+        readings = output.connected.map { Reading($0, now: now) }
+        disconnected = output.disconnected.map { Reading($0, now: now) }
+        saveCache(ReadingCache(savedAt: now, isSample: false, items: output.connected))
     }
 
-    private func histories(for entry: RelayMerge.Entry) -> [String: UsageHistory] {
-        let prefix = entry.provider.id + "/"
-        let series: [String: UsageHistory]
-        if entry.sourceID == sourceID {
-            series = history.weeks
-        } else {
-            series = relayHistories[entry.sourceID]?.series ?? [:]
-        }
-        var result: [String: UsageHistory] = [:]
-        for (key, week) in series where key.hasPrefix(prefix) && !week.isEmpty {
-            result[String(key.dropFirst(prefix.count))] = week
-        }
-        return result
-    }
-
-    /// Widgets redraw from this; it's only rewritten when what they'd draw changed.
+    /// Widgets redraw from this. When nothing they'd draw changed, only the save time moves, so
+    /// they don't refetch, and they aren't reloaded.
     private func saveCache(_ cache: ReadingCache) {
         guard let cacheURL else { return }
         let hash = cache.materialHash
-        guard hash != lastCacheHash else { return }
         do {
             try cache.save(to: cacheURL)
-            lastCacheHash = hash
         } catch {
             logger.error("cache save failed: \(String(describing: error), privacy: .public)")
+            return
         }
+        guard hash != lastCacheHash else { return }
+        lastCacheHash = hash
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     func reading(id: String) -> Reading? {
@@ -361,6 +349,26 @@ final class MobileStore {
         lastHistoryHour = nil
         defaults.set(false, forKey: Keys.published)
         rebuild()
+    }
+
+    /// A background app refresh: the relay and this iPhone's keys, then the next request.
+    func backgroundRefresh() async {
+        await refresh(force: true)
+        await scheduleBackgroundRefresh()
+    }
+
+    func scheduleBackgroundRefresh(now: Date = .now) async {
+        let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskID)
+        request.earliestBeginDate = now.addingTimeInterval(Self.backgroundInterval)
+        do {
+            if #available(iOS 27.0, *) {
+                try await BGTaskScheduler.shared.submitTaskRequest(request)
+            } else {
+                try BGTaskScheduler.shared.submit(request)
+            }
+        } catch {
+            logger.error("background refresh not scheduled: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Subscribes to source changes (silent) and alert events (visible notifications).

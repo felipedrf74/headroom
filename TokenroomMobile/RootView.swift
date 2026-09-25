@@ -13,6 +13,18 @@ struct RootView: View {
     @State private var settingsPath: [SettingsRoute] = []
 
     var body: some View {
+        #if DEBUG
+        if let page = UserDefaults.standard.string(forKey: "TokenroomGallery") {
+            WidgetGalleryView(cache: ReadingCache.defaultURL.flatMap(ReadingCache.load) ?? SampleData.cache(), page: page)
+        } else {
+            tabs
+        }
+        #else
+        tabs
+        #endif
+    }
+
+    private var tabs: some View {
         TabView(selection: $tab) {
             Tab("Usage", systemImage: "gauge.with.dots.needle.50percent", value: .usage) {
                 UsageView(store: store, path: $usagePath)

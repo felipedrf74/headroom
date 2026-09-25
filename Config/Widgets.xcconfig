@@ -1,0 +1,25 @@
+// Tokenroom's iPhone widgets (a WidgetKit extension embedded in TokenroomMobile).
+#include "Version.xcconfig"
+
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+SUPPORTS_MACCATALYST = NO
+TARGETED_DEVICE_FAMILY = 1
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_BUNDLE_IDENTIFIER = $(TOKENROOM_BUNDLE_PREFIX).ios.widgets
+MARKETING_VERSION = $(TOKENROOM_MOBILE_VERSION)
+CURRENT_PROJECT_VERSION = $(TOKENROOM_MOBILE_BUILD)
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_ENTITLEMENTS = TokenroomWidgets/TokenroomWidgets.entitlements
+SKIP_INSTALL = YES
+APPLICATION_EXTENSION_API_ONLY = YES
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = TokenroomWidgets/Info.plist
+INFOPLIST_KEY_CFBundleDisplayName = Tokenroom
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
+SWIFT_EMIT_LOC_STRINGS = YES

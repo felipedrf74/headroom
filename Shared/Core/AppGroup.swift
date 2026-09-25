@@ -19,6 +19,11 @@ enum AppGroup {
         identifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }
     }
 
+    /// Settings the app and its widgets both read: sample mode, this iPhone's relay ID, budgets.
+    static var defaults: UserDefaults {
+        identifier.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+    }
+
     /// An Info.plist value that the build filled in.
     private static func configured(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,

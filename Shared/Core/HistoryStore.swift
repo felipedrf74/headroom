@@ -14,11 +14,19 @@ final class HistoryStore {
     private let fileURL: URL?
 
     init(directory: URL?) {
-        fileURL = directory?.appendingPathComponent("history.json")
-        if let fileURL, let data = try? Data(contentsOf: fileURL),
-           let saved = try? RelayEnvelope.decoder.decode([String: UsageHistory].self, from: data) {
-            weeks = saved
-        }
+        fileURL = directory?.appendingPathComponent(Self.fileName)
+        weeks = Self.load(from: directory)
+    }
+
+    nonisolated static let fileName = "history.json"
+
+    /// The saved weeks, keyed `provider/window`, for readers that don't record (widgets).
+    nonisolated static func load(from directory: URL?) -> [String: UsageHistory] {
+        guard let url = directory?.appendingPathComponent(fileName),
+              let data = try? Data(contentsOf: url),
+              let saved = try? RelayEnvelope.decoder.decode([String: UsageHistory].self, from: data)
+        else { return [:] }
+        return saved
     }
 
     func record(_ snapshot: QuotaSnapshot) {
