@@ -1,0 +1,12 @@
+{
+  "plan_type": "business",
+  "rate_limit": {
+    "primary_window": { "used_percent": 18, "limit_window_seconds": 604800, "reset_at": 1790600000 },
+    "secondary_window": null
+  },
+  "spend_control": {
+    "reached": false,
+    "individual_limit": { "limit": "50.00", "used": "12.5", "remaining_percent": 75, "resets_at": "2026-10-01T00:00:00Z" }
+  },
+  "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
+}

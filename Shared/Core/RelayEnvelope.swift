@@ -53,6 +53,9 @@ struct RelayEnvelope: Codable, Equatable, Sendable {
             hasher.combine(provider.id)
             hasher.combine(provider.state)
             hasher.combine(provider.plan)
+            hasher.combine(provider.banked?.available)
+            hasher.combine(provider.banked?.expiries.first)
+            hasher.combine(provider.extra?.amount.remainingOrComputed.map { Int($0.rounded()) })
             for window in provider.windows {
                 hasher.combine(window.id)
                 hasher.combine(Int(window.used.rounded()))
@@ -81,6 +84,8 @@ struct RelayProvider: Codable, Equatable, Sendable, Identifiable {
     var plan: String?
     var primaryWindowID: String?
     var windows: [RelayWindow]
+    var banked: BankedResets? = nil
+    var extra: ExtraUsage? = nil
 
     var primaryWindow: RelayWindow? {
         windows.first { $0.id == primaryWindowID } ?? windows.first
@@ -98,4 +103,7 @@ struct RelayWindow: Codable, Equatable, Sendable, Identifiable {
     /// Window length in seconds, when known; readers need it for pace.
     var periodSec: Double? = nil
     var startsAt: Date? = nil
+    var amount: QuotaAmount? = nil
+    /// False for amount-only windows (a balance with no limit).
+    var metered: Bool? = nil
 }

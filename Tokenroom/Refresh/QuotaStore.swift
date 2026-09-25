@@ -186,8 +186,13 @@ final class QuotaStore {
                 plan: snapshot?.planLabel,
                 primaryWindowID: snapshot?.windows.first?.id,
                 windows: snapshot?.windows.map {
-                    RelayWindow(id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt, periodSec: $0.windowSeconds, startsAt: $0.startsAt)
-                } ?? []
+                    RelayWindow(
+                        id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt,
+                        periodSec: $0.windowSeconds, startsAt: $0.startsAt, amount: $0.amount, metered: $0.metered
+                    )
+                } ?? [],
+                banked: snapshot?.banked,
+                extra: snapshot?.extra
             )
         }
         return RelayEnvelope(

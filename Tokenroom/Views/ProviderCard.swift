@@ -128,6 +128,12 @@ struct ProviderCard: View {
         ForEach(extraWindows(snapshot)) { window in
             caption(windowCaption(window))
         }
+        if let banked = snapshot.banked {
+            caption(Self.bankedText(banked))
+        }
+        if let extra = snapshot.extra, let text = Self.extraText(extra) {
+            caption(text)
+        }
         if let plan = snapshot.planLabel, plan != snapshot.primaryTitle {
             caption(plan)
         }
@@ -147,6 +153,17 @@ struct ProviderCard: View {
                 .font(.system(size: TokenroomTokens.popoverPercentSize, weight: .medium).monospacedDigit())
                 .foregroundStyle(TokenroomTokens.ink(remaining: remaining, isStale: stale))
         }
+    }
+
+    static func bankedText(_ banked: BankedResets, now: Date = .now) -> String {
+        let count = banked.available == 1 ? "1 banked reset" : "\(banked.available) banked resets"
+        guard let next = banked.nextExpiry(after: now) else { return count }
+        return "\(count) · next expires \(next.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    static func extraText(_ extra: ExtraUsage) -> String? {
+        guard extra.isEnabled, let remaining = extra.amount.remainingOrComputed else { return nil }
+        return "\(extra.title) · \(AmountFormat.text(remaining, unit: extra.amount.unit)) left"
     }
 
     private func paceColor(_ severity: Pace.Severity) -> Color {
