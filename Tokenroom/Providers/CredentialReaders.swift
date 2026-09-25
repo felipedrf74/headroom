@@ -2,7 +2,6 @@ import Foundation
 import LocalAuthentication
 import os
 import Security
-import SQLite3
 
 /// Reads sessions that the official CLIs and apps already keep on this Mac.
 /// Everything here is read-only: Tokenroom never refreshes or rewrites another tool's tokens.
@@ -340,20 +339,9 @@ enum CredentialReaders {
         if let cached = cursorCache.withLock({ $0 }), Date().timeIntervalSince(cached.readAt) < 20 {
             return cached.token
         }
-        let path = cursorDatabaseURL.path
-        if FileManager.default.fileExists(atPath: path) {
-            if let token = sqliteCursorToken(at: path) {
-                cursorCache.withLock { $0 = (token, Date()) }
-                return token
-            }
-            // A busy database can refuse a read-only open; a copy can still be read.
-            if let copy = copyCursorDatabase() {
-                defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
-                if let token = sqliteCursorToken(at: copy.path) {
-                    cursorCache.withLock { $0 = (token, Date()) }
-                    return token
-                }
-            }
+        if let token = LocalSources.vscodeState("cursorAuth/accessToken", database: cursorDatabaseURL) {
+            cursorCache.withLock { $0 = (token, Date()) }
+            return token
         }
         // Cursor 3.9 and later keep the token in the Keychain instead.
         if let token = keychainPassword(service: cursorKeychainService, promptAllowed: false), !token.isEmpty {
@@ -370,58 +358,6 @@ enum CredentialReaders {
         let wal = fileStamp(URL(fileURLWithPath: cursorDatabaseURL.path + "-wal"))
         if db == nil, wal == nil { return nil }
         return [db, wal].compactMap { $0 }.joined(separator: ":")
-    }
-
-    private static func sqliteCursorToken(at path: String) -> String? {
-        var database: OpaquePointer?
-        let encoded = path.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "?"))) ?? path
-        let uri = "file://\(encoded)?mode=ro"
-        let uriFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
-        if sqlite3_open_v2(uri, &database, uriFlags, nil) != SQLITE_OK {
-            if let database { sqlite3_close(database) }
-            database = nil
-            if sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
-                if let database { sqlite3_close(database) }
-                return nil
-            }
-        }
-        guard let database else { return nil }
-        defer { sqlite3_close(database) }
-        sqlite3_busy_timeout(database, 1_500)
-        _ = sqlite3_exec(database, "PRAGMA query_only = ON", nil, nil, nil)
-
-        let sql = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1"
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            return nil
-        }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_text(statement, 0) else {
-            return nil
-        }
-        let token = String(cString: bytes)
-        return token.isEmpty ? nil : token
-    }
-
-    private static func copyCursorDatabase() -> URL? {
-        let src = cursorDatabaseURL
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TokenroomCursor-\(UUID().uuidString)", isDirectory: true)
-        let dest = folder.appendingPathComponent("state.vscdb")
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: src, to: dest)
-            for suffix in ["-wal", "-shm"] {
-                let extra = URL(fileURLWithPath: src.path + suffix)
-                if FileManager.default.fileExists(atPath: extra.path) {
-                    try FileManager.default.copyItem(at: extra, to: URL(fileURLWithPath: dest.path + suffix))
-                }
-            }
-            return dest
-        } catch {
-            try? FileManager.default.removeItem(at: folder)
-            return nil
-        }
     }
 
     /// - Parameter promptAllowed: false fails quietly instead of asking for Keychain access,
