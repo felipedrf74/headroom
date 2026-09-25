@@ -144,6 +144,23 @@ final class MobileLogicTests: XCTestCase {
         XCTAssertEqual(output.disconnected.map(\.id), ["cursor"])
     }
 
+    func testTheWatchReadsEveryCollectorFromICloud() {
+        let mac = RelayEnvelope(producer: "mac", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .claude, status: .live(snapshot(.claude, used: 70)), checkedAt: now)])
+        let phone = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 20)), checkedAt: now)])
+        let contents = CloudRelay.Contents(
+            sources: [
+                CloudRelay.Source(id: "src-mac", kind: "mac", label: "Mac", modifiedAt: now, envelope: mac, needsNewerApp: false),
+                CloudRelay.Source(id: "src-phone", kind: "iphone", label: "iPhone", modifiedAt: now, envelope: phone, needsNewerApp: false),
+                CloudRelay.Source(id: "src-future", kind: "mac", label: "Mac", modifiedAt: now, envelope: nil, needsNewerApp: true),
+            ],
+            histories: [:]
+        )
+        let cache = RelayReadings.cache(from: contents, now: now)
+        XCTAssertEqual(cache.items.map(\.id), ["claude", "openrouter"], "The iPhone's own readings reach the Watch too")
+        XCTAssertEqual(cache.items.map(\.source), ["Mac", "iPhone"])
+        XCTAssertFalse(cache.isSample)
+    }
+
     func testReadingsRollOverAtReset() throws {
         let item = try XCTUnwrap(SampleData.cache(now: now).items.first { $0.id == "claude" })
         let session = try XCTUnwrap(item.provider.windows.first { $0.id == "session" }?.resetsAt)
