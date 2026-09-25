@@ -61,6 +61,7 @@ final class RelayPublisher {
     private var lastStates: [String: String] = [:]
     private var retryAt: Date?
     private var lastHistoryHour: Date?
+    private var loggedAccount = false
     private let logger = Logger(subsystem: TokenroomIdentity.bundleID, category: "relay")
 
     init(defaults: UserDefaults = .standard, containerIdentifier: String? = RelayAvailability.containerIdentifier) {
@@ -103,6 +104,10 @@ final class RelayPublisher {
             }
             try await relay.publish(sourceID: sourceID, kind: "mac", label: label, envelope: envelope)
             logger.notice("relay sent \(envelope.providers.count, privacy: .public) providers")
+            if !loggedAccount, let fingerprint = try? await relay.accountFingerprint() {
+                loggedAccount = true
+                logger.notice("relay account \(fingerprint, privacy: .public)")
+            }
             lastHash = hash
             lastStates = states
             lastSent = now

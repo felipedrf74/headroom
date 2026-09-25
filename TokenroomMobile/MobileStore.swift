@@ -21,6 +21,7 @@ final class MobileStore {
     private(set) var lastRefresh: Date?
     /// Last CloudKit error, for debug diagnostics only.
     private var lastErrorDescription: String?
+    private var accountFingerprint: String?
     private let relay: CloudRelay?
 
     init(containerIdentifier: String? = RelayAvailability.containerIdentifier) {
@@ -55,6 +56,9 @@ final class MobileStore {
                 return
             }
             sources = try await relay.sources()
+            #if DEBUG
+            accountFingerprint = try? await relay.accountFingerprint()
+            #endif
             lastRefresh = .now
             lastErrorDescription = nil
             phase = .ready
@@ -76,6 +80,7 @@ final class MobileStore {
             "lastChecked": lastChecked.map { Int($0.timeIntervalSince1970) } ?? 0,
             "at": Int(Date().timeIntervalSince1970),
             "error": lastErrorDescription ?? "",
+            "account": accountFingerprint ?? "",
         ]
         guard let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
               let data = try? JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys])
