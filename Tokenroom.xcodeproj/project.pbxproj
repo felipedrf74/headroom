@@ -60,6 +60,11 @@
 			path = Relay;
 			sourceTree = "<group>";
 		};
+		5A0000000000000000000003 /* UI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = UI;
+			sourceTree = "<group>";
+		};
 		D10000000000000000000002 /* TokenroomMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -136,6 +141,7 @@
 			children = (
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
+				5A0000000000000000000003 /* UI */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -159,6 +165,7 @@
 				AA0000000000000000000006 /* Tokenroom */,
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
+				5A0000000000000000000003 /* UI */,
 			);
 			name = Tokenroom;
 			productName = Tokenroom;
@@ -202,6 +209,7 @@
 				D10000000000000000000002 /* TokenroomMobile */,
 				5A0000000000000000000001 /* Core */,
 				5A0000000000000000000002 /* Relay */,
+				5A0000000000000000000003 /* UI */,
 			);
 			name = TokenroomMobile;
 			productName = TokenroomMobile;

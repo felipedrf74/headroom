@@ -66,7 +66,7 @@ struct UsageListView: View {
 }
 
 private struct ProviderRow: View {
-    var entry: MobileStore.Entry
+    var entry: RelayMerge.Entry
 
     private var provider: RelayProvider {
         entry.provider
@@ -93,11 +93,10 @@ private struct ProviderRow: View {
                 Text(provider.primaryWindow.map { "\(Int($0.used.rounded()))%" } ?? "—")
                     .font(.system(.title, design: .rounded, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(isLive ? Color.primary : Color.secondary)
+                    .foregroundStyle(TokenroomTokens.ink(remaining: 100 - (provider.primaryWindow?.used ?? 0), isStale: !isLive))
             }
             if let window = provider.primaryWindow {
-                ProgressView(value: min(max(window.used, 0), 100), total: 100)
-                    .tint(isLive ? UsageColor.color(for: window.used) : .secondary)
+                MeterTrack(usedPercent: window.used, remaining: 100 - window.used, isStale: !isLive)
                 Text(caption(for: window))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -143,21 +142,6 @@ struct MonogramMark: View {
                     .foregroundStyle(.white)
             }
             .accessibilityHidden(true)
-    }
-}
-
-/// Same thresholds as the Mac menu bar: light blue, yellow from 50%, orange from 75%, red from 90%.
-enum UsageColor {
-    static let healthy = Color(red: 110 / 255, green: 196 / 255, blue: 245 / 255)
-    static let watch = Color(red: 242 / 255, green: 196 / 255, blue: 22 / 255)
-    static let tight = Color(red: 232 / 255, green: 122 / 255, blue: 16 / 255)
-    static let critical = Color(red: 214 / 255, green: 45 / 255, blue: 38 / 255)
-
-    static func color(for used: Double) -> Color {
-        if used >= 90 { return critical }
-        if used >= 75 { return tight }
-        if used >= 50 { return watch }
-        return healthy
     }
 }
 

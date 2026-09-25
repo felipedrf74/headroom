@@ -16,12 +16,6 @@ final class MobileStore {
         case failed(String)
     }
 
-    struct Entry: Identifiable {
-        var provider: RelayProvider
-        var sourceLabel: String
-        var id: String { provider.id }
-    }
-
     private(set) var sources: [CloudRelay.Source] = []
     private(set) var phase: Phase = .idle
     private(set) var lastRefresh: Date?
@@ -36,28 +30,11 @@ final class MobileStore {
         }
     }
 
-    /// One entry per provider. When several Macs report the same provider, the live reading
-    /// checked most recently wins; a stale or expired one never hides another Mac's live one.
-    var entries: [Entry] {
-        var best: [String: (entry: Entry, live: Bool, checked: Date)] = [:]
-        for source in sources {
-            guard let envelope = source.envelope else { continue }
-            for provider in envelope.providers {
-                let live = provider.state == "live"
-                let checked = provider.checkedAt ?? provider.fetchedAt ?? .distantPast
-                let candidate = (Entry(provider: provider, sourceLabel: source.label), live, checked)
-                if let current = best[provider.id] {
-                    if (live && !current.live) || (live == current.live && checked > current.checked) {
-                        best[provider.id] = candidate
-                    }
-                } else {
-                    best[provider.id] = candidate
-                }
-            }
-        }
-        return best.values
-            .map(\.entry)
-            .sorted { ($0.provider.primaryWindow?.used ?? -1) > ($1.provider.primaryWindow?.used ?? -1) }
+    /// One entry per provider across every Mac; see `RelayMerge` for the rules.
+    var entries: [RelayMerge.Entry] {
+        RelayMerge.entries(from: sources.compactMap { source in
+            source.envelope.map { RelayMerge.Source(id: source.id, label: source.label, envelope: $0) }
+        })
     }
 
     /// When the freshest Mac last checked, even if nothing changed.
