@@ -12,6 +12,7 @@ final class MobileAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         application.registerForRemoteNotifications()
+        WatchLink.shared.activate()
         return true
     }
 

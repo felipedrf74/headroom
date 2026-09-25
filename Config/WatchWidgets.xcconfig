@@ -1,0 +1,24 @@
+// Tokenroom's complications and Smart Stack widget, embedded in TokenroomWatch.
+#include "Version.xcconfig"
+
+SDKROOT = watchos
+SUPPORTED_PLATFORMS = watchos watchsimulator
+TARGETED_DEVICE_FAMILY = 4
+WATCHOS_DEPLOYMENT_TARGET = 26.0
+
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_BUNDLE_IDENTIFIER = $(TOKENROOM_BUNDLE_PREFIX).ios.watchkitapp.widgets
+MARKETING_VERSION = $(TOKENROOM_MOBILE_VERSION)
+CURRENT_PROJECT_VERSION = $(TOKENROOM_MOBILE_BUILD)
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_ENTITLEMENTS = TokenroomWatchWidgets/TokenroomWatchWidgets.entitlements
+SKIP_INSTALL = YES
+APPLICATION_EXTENSION_API_ONLY = YES
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = TokenroomWatchWidgets/Info.plist
+INFOPLIST_KEY_CFBundleDisplayName = Tokenroom
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
+SWIFT_EMIT_LOC_STRINGS = YES

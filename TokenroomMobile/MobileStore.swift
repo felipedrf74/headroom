@@ -303,6 +303,7 @@ final class MobileStore {
         guard hash != lastCacheHash else { return }
         lastCacheHash = hash
         WidgetCenter.shared.reloadAllTimelines()
+        WatchLink.shared.send(cache)
     }
 
     func reading(id: String) -> Reading? {
