@@ -2,6 +2,7 @@ import SwiftUI
 
 enum SettingsRoute: Hashable {
     case keys
+    case alerts
 }
 
 struct MobileSettingsView: View {
@@ -26,6 +27,7 @@ struct MobileSettingsView: View {
                 }
 
                 Section {
+                    NavigationLink("Alerts", value: SettingsRoute.alerts)
                     NavigationLink("API Keys", value: SettingsRoute.keys)
                 } footer: {
                     Text("Read providers right from this iPhone. Keys stay in its Keychain; they're never synced or sent to your other devices.")
@@ -53,6 +55,7 @@ struct MobileSettingsView: View {
             .navigationDestination(for: SettingsRoute.self) { route in
                 switch route {
                 case .keys: KeysView(store: store)
+                case .alerts: AlertsSettingsView(store: store)
                 }
             }
             .confirmationDialog("Delete Tokenroom data from iCloud?", isPresented: $confirmsDelete, titleVisibility: .visible) {

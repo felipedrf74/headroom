@@ -19,6 +19,9 @@ API keys stay in the Mac’s Keychain; only the last four characters are shown.
 - Claude: per-model caps and extra usage. An optional Claude Code status-line bridge keeps Claude’s meters current when the direct read can’t.
 - Cursor 3.9 and later: the login in the Keychain. Grok: your plan’s name.
 
+### Alerts
+- Alerts at 80% and 95%, when a window that reached 80% resets, and when a banked reset arrives or is about to expire. They go to your iPhone through iCloud once per event, however many Macs see it, and follow the iPhone's quiet hours. Settings › iPhone & Watch can show them on the Mac too.
+
 ### Menu bar and settings
 - Settings has Providers, Menu Bar, iPhone & Watch, and General tabs.
 - Any provider can be left out of the menu bar, and the **Highest** style shows only the most-used meter.

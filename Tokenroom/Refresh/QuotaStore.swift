@@ -20,6 +20,7 @@ final class QuotaStore {
     let relay: RelayPublisher?
     /// A week of hourly usage per window, next to the snapshot cache.
     let history: HistoryStore
+    private var alertLedger: AlertLedger
 
     private let clients: [Provider: any ProviderClient]
     private let cache: SnapshotCache
@@ -44,6 +45,7 @@ final class QuotaStore {
         self.cache = cache
         self.relay = relay
         self.history = HistoryStore(directory: cache.directory)
+        self.alertLedger = AlertLedger.load(from: cache.directory)
         self.showsLegacyNotice = showsLegacyNotice
         self.signIn = SignInCoordinator()
         let cached = cache.load()
@@ -149,9 +151,24 @@ final class QuotaStore {
         persistLiveSnapshots()
         history.saveIfNeeded()
         isRefreshing = false
-        await relay?.publish(relayEnvelope(at: now))
+        let envelope = relayEnvelope(at: now)
+        await relay?.publish(envelope)
         let relayed = Provider.allCases.filter { settings.isEnabled($0) }
         await relay?.publishHistory(history.relayHistory(for: relayed), now: now)
+        await sendAlerts(for: envelope.providers, now: now)
+    }
+
+    /// Alerts for crossings since the last refresh: to the iPhone through iCloud, and on this Mac
+    /// when turned on. Each goes out once, from whichever device saw it first.
+    private func sendAlerts(for providers: [RelayProvider], now: Date) async {
+        let preferences = await relay?.alertPreferences(now: now) ?? AlertPreferences()
+        let alerts = alertLedger.process(providers, preferences: preferences, now: now)
+        alertLedger.save(to: cache.directory)
+        guard !alerts.isEmpty else { return }
+        await relay?.sendAlerts(alerts, preferences: preferences, now: now)
+        if settings.showsAlertsOnMac {
+            MacAlerts.post(alerts.filter { preferences.shouldSend($0, at: now) })
+        }
     }
 
     /// Pace of a provider's primary window, from its recent readings.

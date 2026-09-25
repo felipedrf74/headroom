@@ -155,10 +155,24 @@ final class MobileLogicTests: XCTestCase {
         XCTAssertEqual(item.rolledOver(at: now), item)
     }
 
+    func testWhichWindowALiveActivityFollows() throws {
+        let cache = SampleData.cache(now: now)
+        let claude = try XCTUnwrap(cache.items.first { $0.id == "claude" }).provider
+        XCTAssertEqual(claude.windowToFollow(now: now)?.id, "session", "A session resetting soon")
+        let grok = try XCTUnwrap(cache.items.first { $0.id == "grok" }).provider
+        XCTAssertNil(grok.windowToFollow(now: now), "A weekly window days from its reset isn't worth one")
+
+        let nearlySpent = RelayProvider(id: "x", name: "X", shortName: "X", monogram: "X", tint: "#000000", state: "live", primaryWindowID: "weekly", windows: [
+            RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 91, resetsAt: now.addingTimeInterval(5 * 3600)),
+            RelayWindow(id: "light", kind: "weekly", title: "Other", used: 20, resetsAt: now.addingTimeInterval(3600)),
+        ])
+        XCTAssertEqual(nearlySpent.windowToFollow(now: now)?.id, "weekly", "The last hours of a nearly spent week")
+    }
+
     // MARK: Deep links and text
 
     func testDeepLinksRoundTrip() {
-        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .settings, .keys] {
+        for link in [DeepLink.provider("claude"), .provider("kimiCode"), .news, .settings, .keys] {
             XCTAssertEqual(DeepLink(link.url), link)
         }
         XCTAssertNil(DeepLink(URL(string: "https://example.com/provider/claude")!))

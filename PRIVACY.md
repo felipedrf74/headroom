@@ -59,6 +59,12 @@ When you add keys on the iPhone, it writes its own readings (never the keys) to 
 
 The records never contain tokens, API keys, email addresses, names, account or organization IDs, or file paths.
 
+Alerts travel the same way. When a window crosses 80% or 95%, resets after heavy use, or a banked reset arrives or is about to expire, a Mac saves a short alert record (provider, level, and the text you see) that your iPhone shows as a notification. The iPhone saves your alert choices and quiet hours as one more record, so Macs follow them. Alert records are deleted after two weeks.
+
+## News
+
+The iPhone's News tab reads public pages only, with no account and nothing about you in the request: OpenRouter's public model list (`openrouter.ai`), and official changelogs and blogs (`code.claude.com`, `openai.com`, `github.com`, `blog.google`, `github.blog`, `cursor.com`, `docs.devin.ai`, `docs.z.ai`, `openrouter.ai`). It keeps titles, dates, and links on the device and opens articles in Safari.
+
 ## What Tokenroom does not store or send
 
 - access tokens, refresh tokens, or another tool’s login

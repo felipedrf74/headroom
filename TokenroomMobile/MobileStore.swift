@@ -2,6 +2,7 @@ import BackgroundTasks
 import CloudKit
 import Foundation
 import Observation
+import UserNotifications
 import WidgetKit
 import os
 
@@ -46,6 +47,9 @@ final class MobileStore {
         static let onboarded = "onboarded"
         static let budgets = "budgets"
         static let published = "relayPublished"
+        static let alertPreferences = "alertPreferences"
+        static let alertPreferencesShared = "alertPreferencesShared"
+        static let prunedAt = "eventsPrunedAt"
     }
 
     static let localLabel = "This iPhone"
@@ -81,6 +85,18 @@ final class MobileStore {
         didSet { defaults.set(hasOnboarded, forKey: Keys.onboarded) }
     }
 
+    /// Which alerts to send, and quiet hours. Shared through iCloud so Macs follow them too.
+    var alertPreferences: AlertPreferences {
+        didSet {
+            guard alertPreferences != oldValue else { return }
+            if let data = try? JSONEncoder().encode(alertPreferences) {
+                defaults.set(data, forKey: Keys.alertPreferences)
+            }
+            defaults.set(false, forKey: Keys.alertPreferencesShared)
+            Task { await shareAlertPreferences() }
+        }
+    }
+
     let keys: APIKeyStore
     let sourceID: String
     private let relay: CloudRelay?
@@ -91,6 +107,9 @@ final class MobileStore {
     private var lastHistoryHour: Date?
     private var lastCacheHash: Int?
     private var rateLimitedUntil: [Provider: Date] = [:]
+    private var alertLedger: AlertLedger
+    private var relayEvents: [(id: String, createdAt: Date?)] = []
+    private let directory: URL?
     private let logger = Logger(subsystem: TokenroomIdentity.bundleID, category: "store")
 
     init(
@@ -110,6 +129,9 @@ final class MobileStore {
         relay = containerIdentifier.map(CloudRelay.init(containerIdentifier:))
         relayPhase = relay == nil ? .unavailable : .idle
         history = HistoryStore(directory: directory)
+        self.directory = directory
+        alertLedger = AlertLedger.load(from: directory)
+        alertPreferences = defaults.data(forKey: Keys.alertPreferences).flatMap { try? JSONDecoder().decode(AlertPreferences.self, from: $0) } ?? AlertPreferences()
         cacheURL = directory?.appendingPathComponent(ReadingCache.fileName)
         sampleMode = defaults.bool(forKey: Keys.sampleMode)
         hasOnboarded = defaults.bool(forKey: Keys.onboarded)
@@ -140,6 +162,8 @@ final class MobileStore {
 
         rebuild(now: now)
         await publish(now: now)
+        await sendAlerts(now: now)
+        await pruneEvents(now: now)
         history.saveIfNeeded()
     }
 
@@ -159,6 +183,7 @@ final class MobileStore {
             let contents = try await relay.contents()
             relaySources = contents.sources.filter { $0.id != sourceID }
             relayHistories = contents.histories
+            relayEvents = contents.events
             relayPhase = .ready
         } catch {
             logger.error("relay read failed: \(String(describing: error), privacy: .public)")
@@ -260,6 +285,8 @@ final class MobileStore {
         readings = output.connected.map { Reading($0, now: now) }
         disconnected = output.disconnected.map { Reading($0, now: now) }
         saveCache(ReadingCache(savedAt: now, isSample: false, items: output.connected))
+        let providers = output.connected.map(\.provider)
+        Task { await LiveActivities.update(with: providers, now: now) }
     }
 
     /// Widgets redraw from this. When nothing they'd draw changed, only the save time moves, so
@@ -338,6 +365,63 @@ final class MobileStore {
         }
     }
 
+    // MARK: Alerts
+
+    /// Alerts for what only this iPhone reads, with its keys. A provider a Mac also reports live
+    /// gets its alert from that Mac, through iCloud, so one crossing makes one notification.
+    /// These are local: iCloud doesn't notify the device that saved a record.
+    private func sendAlerts(now: Date) async {
+        guard !sampleMode, !localStatuses.isEmpty else { return }
+        let coveredByMacs = Set(relaySources.compactMap(\.envelope).flatMap { envelope in
+            envelope.providers.filter { $0.isLive && now.timeIntervalSince(envelope.checkedAt) < 3600 }.map(\.id)
+        })
+        let providers = localEnvelope(now: now).providers.filter { !coveredByMacs.contains($0.id) }
+        let alerts = alertLedger.process(providers, preferences: alertPreferences, now: now)
+            .filter { alertPreferences.shouldSend($0, at: now) }
+        alertLedger.save(to: directory)
+        alerts.forEach(Self.notify)
+    }
+
+    private static func notify(_ alert: UsageAlert) {
+        let content = UNMutableNotificationContent()
+        content.title = alert.title
+        content.body = alert.body
+        content.sound = .default
+        content.threadIdentifier = alert.provider
+        content.interruptionLevel = alert.isUrgent ? .timeSensitive : .active
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: alert.id, content: content, trigger: nil))
+    }
+
+    /// Lets Macs follow this iPhone's choices. Retried on the next refresh if iCloud is away.
+    func shareAlertPreferences() async {
+        guard let relay, relayPhase == .ready, !defaults.bool(forKey: Keys.alertPreferencesShared) else { return }
+        var preferences = alertPreferences
+        preferences.timeZoneID = TimeZone.current.identifier
+        do {
+            try await relay.publishAlertPreferences(preferences)
+            defaults.set(true, forKey: Keys.alertPreferencesShared)
+        } catch {
+            logger.error("alert preferences not shared: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Alert records are only needed until their notification goes out. Once a day, those older
+    /// than two weeks are deleted.
+    private func pruneEvents(now: Date) async {
+        await shareAlertPreferences()
+        guard let relay, relayPhase == .ready else { return }
+        if let pruned = defaults.object(forKey: Keys.prunedAt) as? Date, now.timeIntervalSince(pruned) < 86_400 { return }
+        let old = relayEvents.filter { event in
+            event.createdAt.map { now.timeIntervalSince($0) > CloudRelay.eventLifetime } ?? false
+        }.map(\.id)
+        do {
+            try await relay.deleteRecords(named: old)
+            defaults.set(now, forKey: Keys.prunedAt)
+        } catch {
+            logger.error("alert pruning failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// Deletes every Tokenroom record in iCloud, from every device. Macs with sync on send fresh
     /// readings on their next check.
     func deleteICloudData() async throws {
@@ -347,7 +431,9 @@ final class MobileStore {
         relayHistories = [:]
         publishPolicy.reset()
         lastHistoryHour = nil
+        relayEvents = []
         defaults.set(false, forKey: Keys.published)
+        defaults.set(false, forKey: Keys.alertPreferencesShared)
         rebuild()
     }
 

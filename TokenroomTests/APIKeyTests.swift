@@ -59,7 +59,7 @@ final class APIKeyTests: XCTestCase {
         XCTAssertFalse(window.isMetered)
         XCTAssertEqual(window.amount?.used ?? 0, 61.35, accuracy: 0.001)
         XCTAssertEqual(snapshot.planLabel, "Free tier")
-        XCTAssertEqual(ProviderCard.amountHeadline(window.amount!)?.hasSuffix("spent"), true)
+        XCTAssertEqual(ReadingText.amountHeadline(window.amount!)?.hasSuffix("spent"), true)
     }
 
     func testOpenRouterPeriodsResetAtUTCMidnight() {

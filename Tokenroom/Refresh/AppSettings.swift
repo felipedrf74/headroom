@@ -46,6 +46,11 @@ final class AppSettings {
         didSet { applyLaunchAtLogin() }
     }
 
+    /// Usage alerts as notifications on this Mac too. The iPhone gets them either way.
+    var showsAlertsOnMac: Bool {
+        didSet { persist() }
+    }
+
     private var applyingLogin = false
 
     var refreshInterval: TimeInterval {
@@ -63,6 +68,7 @@ final class AppSettings {
         static let menuStyle = "menuStyle"
         static let hiddenFromMenuBar = "menuBarHidden"
         static let budgets = "budgets"
+        static let alertsOnMac = "alertsOnMac"
     }
 
     static let currentVersion = 2
@@ -87,6 +93,7 @@ final class AppSettings {
             }
         }
         self.budgets = budgets
+        showsAlertsOnMac = defaults.bool(forKey: Keys.alertsOnMac)
         launchAtLogin = SMAppService.mainApp.status == .enabled
         isReady = true
         persist()
@@ -161,6 +168,7 @@ final class AppSettings {
         defaults.set(menuStyle.rawValue, forKey: Keys.menuStyle)
         defaults.set(hiddenFromMenuBar.map(\.rawValue).sorted(), forKey: Keys.hiddenFromMenuBar)
         defaults.set(Dictionary(uniqueKeysWithValues: budgets.map { ($0.key.rawValue, $0.value) }), forKey: Keys.budgets)
+        defaults.set(showsAlertsOnMac, forKey: Keys.alertsOnMac)
     }
 
     private func applyLaunchAtLogin() {

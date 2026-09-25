@@ -50,10 +50,10 @@ final class ProviderUpgradeTests: XCTestCase {
     func testBankedAndCreditCaptions() {
         let now = Date(timeIntervalSince1970: 1_790_000_000)
         let banked = BankedResets(available: 2, expiries: [now.addingTimeInterval(86_400 * 12)])
-        XCTAssertTrue(ProviderCard.bankedText(banked, now: now).hasPrefix("2 banked resets · next expires "))
-        XCTAssertEqual(ProviderCard.bankedText(BankedResets(available: 1), now: now), "1 banked reset")
+        XCTAssertTrue(ReadingText.banked(banked, now: now).hasPrefix("2 banked resets · next expires "))
+        XCTAssertEqual(ReadingText.banked(BankedResets(available: 1), now: now), "1 banked reset")
         let credits = ExtraUsage(title: "Credits", amount: QuotaAmount(remaining: 1240.5, unit: "credits"))
-        XCTAssertEqual(ProviderCard.extraText(credits)?.hasPrefix("Credits · "), true)
+        XCTAssertEqual(ReadingText.extra(credits)?.hasPrefix("Credits · "), true)
         XCTAssertEqual(AmountFormat.text(12.4, unit: "usd", locale: Locale(identifier: "en_US")), "$12.40")
     }
 

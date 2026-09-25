@@ -9,12 +9,18 @@ import Foundation
 /// - `History`: that collector's hourly usage for the last week (`hist-<source>`), sent hourly.
 /// - `Event`: an alert (threshold crossed, test). The iPhone's query subscription turns each new
 ///   one into a visible notification, even when the app isn't running.
+/// - `Prefs`: the iPhone's alert preferences (`prefs-alerts`), so Macs keep its quiet hours.
 actor CloudRelay {
     enum RecordType {
         static let source = "Source"
         static let history = "History"
         static let event = "Event"
+        static let prefs = "Prefs"
     }
+
+    static let alertPreferencesRecord = "prefs-alerts"
+    /// Alert records older than this are deleted; the notification went out long ago.
+    static let eventLifetime: TimeInterval = 14 * 86_400
 
     enum Field {
         static let payload = "payload"
@@ -28,6 +34,7 @@ actor CloudRelay {
         static let title = "title"
         static let body = "body"
         static let resetsAt = "resetsAt"
+        static let alertKind = "alertKind"
     }
 
     static let zoneID = CKRecordZone.ID(zoneName: "Tokenroom", ownerName: CKCurrentUserDefaultName)
@@ -37,6 +44,9 @@ actor CloudRelay {
         var sources: [Source]
         /// Keyed by source ID.
         var histories: [String: RelayHistory]
+        var alertPreferences: AlertPreferences? = nil
+        /// Alert record names and when each was created, for pruning.
+        var events: [(id: String, createdAt: Date?)] = []
     }
 
     struct Source: Sendable, Identifiable {
@@ -102,6 +112,36 @@ actor CloudRelay {
         "hist-\(sourceID)"
     }
 
+    /// Saves an alert. Saving an ID that already exists updates it without a second notification,
+    /// because the iPhone's subscription fires only when a record is created.
+    func saveAlert(_ alert: UsageAlert) async throws {
+        try await saveEvent(id: alert.id, provider: alert.provider, level: alert.level, title: alert.title, body: alert.body, resetsAt: alert.resetsAt, kind: alert.kind.rawValue)
+    }
+
+    /// The iPhone's alert preferences, or nil before it has saved any.
+    func alertPreferences() async throws -> AlertPreferences? {
+        do {
+            let record = try await database.record(for: CKRecord.ID(recordName: Self.alertPreferencesRecord, zoneID: Self.zoneID))
+            return (record[Field.payload] as? Data).flatMap { try? RelayEnvelope.decoder.decode(AlertPreferences.self, from: $0) }
+        } catch let error as CKError where error.code == .unknownItem || error.code == .zoneNotFound {
+            return nil
+        }
+    }
+
+    func publishAlertPreferences(_ preferences: AlertPreferences) async throws {
+        let record = CKRecord(recordType: RecordType.prefs, recordID: CKRecord.ID(recordName: Self.alertPreferencesRecord, zoneID: Self.zoneID))
+        record[Field.payload] = try RelayEnvelope.encoder.encode(preferences)
+        try await save([record])
+    }
+
+    func deleteRecords(named names: [String]) async throws {
+        guard !names.isEmpty else { return }
+        _ = try await database.modifyRecords(
+            saving: [],
+            deleting: names.map { CKRecord.ID(recordName: $0, zoneID: Self.zoneID) }
+        )
+    }
+
     /// Record names are deterministic, so two Macs seeing the same crossing create one alert.
     func saveEvent(
         id: String,
@@ -109,7 +149,8 @@ actor CloudRelay {
         level: Int,
         title: String,
         body: String,
-        resetsAt: Date? = nil
+        resetsAt: Date? = nil,
+        kind: String = "test"
     ) async throws {
         let record = CKRecord(recordType: RecordType.event, recordID: CKRecord.ID(recordName: id, zoneID: Self.zoneID))
         record[Field.provider] = provider
@@ -117,6 +158,7 @@ actor CloudRelay {
         record[Field.title] = title
         record[Field.body] = body
         record[Field.resetsAt] = resetsAt
+        record[Field.alertKind] = kind
         try await save([record])
     }
 
@@ -124,6 +166,8 @@ actor CloudRelay {
     func contents() async throws -> Contents {
         var sources: [Source] = []
         var histories: [String: RelayHistory] = [:]
+        var preferences: AlertPreferences?
+        var events: [(id: String, createdAt: Date?)] = []
         var token: CKServerChangeToken?
         do {
             while true {
@@ -141,6 +185,10 @@ actor CloudRelay {
                               let history = try? RelayHistory.decode(data)
                         else { continue }
                         histories[String(name.dropFirst("hist-".count))] = history
+                    case RecordType.prefs where record.recordID.recordName == Self.alertPreferencesRecord:
+                        preferences = (record[Field.payload] as? Data).flatMap { try? RelayEnvelope.decoder.decode(AlertPreferences.self, from: $0) }
+                    case RecordType.event:
+                        events.append((record.recordID.recordName, record.creationDate))
                     default:
                         continue
                     }
@@ -151,7 +199,7 @@ actor CloudRelay {
         } catch let error as CKError where error.code == .zoneNotFound {
             return Contents(sources: [], histories: [:])
         }
-        return Contents(sources: sources, histories: histories)
+        return Contents(sources: sources, histories: histories, alertPreferences: preferences, events: events)
     }
 
     func sources() async throws -> [Source] {
