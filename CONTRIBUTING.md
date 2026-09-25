@@ -1,12 +1,12 @@
 # Contributing
 
-Thanks for helping with Headroom.
+Thanks for helping with Tokenroom.
 
 ## What to change
 
 Glance first. Keep the extra narrow, Apple-native, and free of identity data.
 
-- UI, tokens, meters, and provider adapters: read `.grok/skills/headroom-macos/SKILL.md`.
+- UI, tokens, meters, and provider adapters: read `.grok/skills/tokenroom-macos/SKILL.md`.
 - Copy starts with the fact. Errors start with “Couldn't…”.
 - Do not put names, emails, user IDs, or tokens in source, fixtures, logs, or `snapshots.json`.
 
@@ -14,16 +14,20 @@ Glance first. Keep the extra narrow, Apple-native, and free of identity data.
 
 ```bash
 ./scripts/build.sh
-open /Applications/Headroom.app
+open /Applications/Tokenroom.app
 ```
 
-Xcode 27 is preferred. Command Line Tools are enough for the `swiftc` fallback in `scripts/build.sh`. DerivedData stays at `~/Library/Developer/Xcode/DerivedData/Headroom`.
+Xcode 27 is preferred. Command Line Tools are enough for the `swiftc` fallback in `scripts/build.sh`. DerivedData stays at `~/Library/Developer/Xcode/DerivedData/Tokenroom`.
 
 There is no Dock icon. After launch, look at the right side of the menu bar.
 
 ## Tests
 
-Parser and sign-in tests live in `HeadroomTests`. Run them from Xcode when it is installed.
+Parser, sign-in, and foundation tests live in `TokenroomTests`. Run them from Xcode, or:
+
+```bash
+xcodebuild test -project Tokenroom.xcodeproj -scheme Tokenroom -destination 'platform=macOS'
+```
 
 ## Sending a change
 

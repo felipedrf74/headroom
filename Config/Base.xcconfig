@@ -1,0 +1,13 @@
+// Tokenroom build settings shared by every target (project level).
+// Machine-specific values (team ID, Mac signing mode) belong in Config/Local.xcconfig,
+// which is git-ignored. Copy Config/Local.xcconfig.example to start.
+
+TOKENROOM_BUNDLE_PREFIX = app.tokenroom
+TOKENROOM_TEAM_ID =
+
+DEVELOPMENT_TEAM = $(TOKENROOM_TEAM_ID)
+SWIFT_VERSION = 6.0
+// Shared/ code compiles into several targets; keep isolation identical everywhere.
+SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated
+
+#include? "Local.xcconfig"

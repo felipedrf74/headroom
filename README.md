@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="96" height="96" alt="Headroom icon">
+  <img src="docs/images/icon.png" width="96" height="96" alt="Tokenroom icon">
 </p>
 
-<h1 align="center">Headroom</h1>
+<h1 align="center">Tokenroom</h1>
 
 <p align="center">
   <strong>Subscription quota in the macOS menu bar.</strong><br>
@@ -17,13 +17,15 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" width="920" alt="Headroom menu bar extra and popover">
+  <img src="docs/images/hero.png" width="920" alt="Tokenroom menu bar extra and popover">
 </p>
 
-Headroom is a menu-bar extra. It does not live in the Dock. It reuses logins you already have. It does not ask for API keys, and it does not keep names, emails, or tokens on disk.
+Tokenroom is a menu-bar extra. It does not live in the Dock. It reuses logins you already have. It does not ask for API keys, and it does not keep names, emails, or tokens on disk.
+
+Tokenroom was called Headroom until 2.0. On first launch it brings over Headroom’s settings and last readings; quit Headroom and move it to the Trash afterwards.
 
 <p align="center">
-  <img src="docs/images/menubar.png" width="920" alt="Headroom in the macOS menu bar">
+  <img src="docs/images/menubar.png" width="920" alt="Tokenroom in the macOS menu bar">
 </p>
 
 ## Glance first
@@ -41,14 +43,14 @@ The extra shows **used %** for every provider you turned on.
 Click the extra for reset times, session windows, and sign-in. Claude’s 5-hour session is in the popover only. Cursor is labeled **This cycle**, never Weekly.
 
 <p align="center">
-  <img src="docs/images/popover.png" width="360" alt="Headroom popover with five provider cards">
+  <img src="docs/images/popover.png" width="360" alt="Tokenroom popover with five provider cards">
 </p>
 
 ## Why it exists
 
-Each of those tools already knows how much quota you have left. None of them put it next to the clock. Headroom does, as tiny percents or iStat-style meters, then gets out of the way.
+Each of those tools already knows how much quota you have left. None of them put it next to the clock. Tokenroom does, as tiny percents or iStat-style meters, then gets out of the way.
 
-- **Local-first.** No Headroom account, no Headroom server, no telemetry.
+- **Local-first.** No Tokenroom account, no Tokenroom server, no telemetry.
 - **Your logins.** Sessions stay in `~/.grok`, Keychain, `~/.codex`, and Cursor’s own database.
 - **Independent meters.** One provider failing never blanks the others.
 - **Two looks.** Percents or vertical used-bars. Refresh every 5, 10, 15, or 30 minutes. Launch at login if you want.
@@ -60,10 +62,10 @@ Numbers in the screenshots are sample data.
 There is no notarized download yet. Build on the Mac that will run it:
 
 ```bash
-git clone https://github.com/felipedrf74/headroom.git
-cd headroom
+git clone https://github.com/felipedrf74/headroom.git tokenroom
+cd tokenroom
 ./scripts/build.sh
-open /Applications/Headroom.app
+open /Applications/Tokenroom.app
 ```
 
 Xcode 27 is preferred. Command Line Tools are enough for the `swiftc` fallback.
@@ -74,22 +76,22 @@ The build is ad-hoc signed and **not sandboxed** — it has to read CLI credenti
 
 ## Sign in
 
-1. Click Headroom in the menu bar.
+1. Click Tokenroom in the menu bar.
 2. On a provider that isn’t signed in, click **Sign In**.
 3. Finish login in the browser, Terminal, or app that opens.
-4. Headroom picks up the session and shows usage.
+4. Tokenroom picks up the session and shows usage.
 
-The same controls live in **Settings → Accounts**. Turning a provider off hides it from Headroom; it does not log you out of that provider.
+The same controls live in **Settings → Accounts**. Turning a provider off hides it from Tokenroom; it does not log you out of that provider.
 
-Claude tokens expire about every eight hours. Headroom refreshes them the same way Claude Code does and writes the new tokens back to Keychain, leaving MCP secrets in that item untouched.
+Tokenroom only reads sessions. It never refreshes or rewrites another tool’s tokens. Claude and Grok sessions expire after a few hours; until you use `claude` or `grok` again (which refreshes them), Tokenroom keeps showing the last reading, faded, for up to a day.
 
 ## Privacy
 
-Headroom caches only percentages, reset times, and window labels in `~/Library/Application Support/Headroom/`. See [PRIVACY.md](PRIVACY.md). What changed between releases: [CHANGELOG.md](CHANGELOG.md).
+Tokenroom caches only percentages, reset times, and window labels in `~/Library/Application Support/Tokenroom/`. See [PRIVACY.md](PRIVACY.md). What changed between releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Settings
 
-Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at login. Bundle ID is `app.headroom.mac`.
+Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at login. Bundle ID is `app.tokenroom.mac`.
 
 ## Develop
 
@@ -97,10 +99,12 @@ Accounts, menu-bar style (Percents or Meters), refresh interval, and launch at l
 ./scripts/build.sh
 ```
 
-DerivedData is forced to `~/Library/Developer/Xcode/DerivedData/Headroom`. UI, tokens, and provider contracts: [`.grok/skills/headroom-macos/SKILL.md`](.grok/skills/headroom-macos/SKILL.md).
+DerivedData is forced to `~/Library/Developer/Xcode/DerivedData/Tokenroom`. UI, tokens, and provider contracts: [`.grok/skills/tokenroom-macos/SKILL.md`](.grok/skills/tokenroom-macos/SKILL.md).
+
+Build settings live in `Config/*.xcconfig`. Builds are ad-hoc signed by default. To sign with your own team, copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (git-ignored) and set `TOKENROOM_TEAM_ID` and `TOKENROOM_MAC_SIGNING = team`. `TOKENROOM_FORCE_SWIFTC=1 ./scripts/build.sh` exercises the Command Line Tools fallback.
 
 `main` is protected. Send a change as a pull request from a fork; the maintainer has to approve it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE). Headroom is not affiliated with xAI, Anthropic, OpenAI, or Anysphere.
+[MIT](LICENSE). Tokenroom is not affiliated with xAI, Anthropic, OpenAI, or Anysphere.

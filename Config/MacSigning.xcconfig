@@ -1,0 +1,15 @@
+// Mac signing modes. Choose one with TOKENROOM_MAC_SIGNING in Config/Local.xcconfig:
+//   adhoc  Default. Anyone can build it; iPhone & Apple Watch sync (iCloud) is off.
+//   team   Apple Development signing with TOKENROOM_TEAM_ID. Needed for iCloud sync.
+// Release builds (scripts/release.sh) archive in team mode and export with Developer ID.
+TOKENROOM_MAC_SIGNING = adhoc
+
+TOKENROOM_SIGN_STYLE_adhoc = Manual
+TOKENROOM_SIGN_IDENTITY_adhoc = -
+TOKENROOM_SIGN_STYLE_team = Automatic
+TOKENROOM_SIGN_IDENTITY_team = Apple Development
+
+CODE_SIGN_STYLE = $(TOKENROOM_SIGN_STYLE_$(TOKENROOM_MAC_SIGNING))
+CODE_SIGN_IDENTITY = $(TOKENROOM_SIGN_IDENTITY_$(TOKENROOM_MAC_SIGNING))
+
+#include? "Local.xcconfig"

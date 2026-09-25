@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0 — Unreleased
+
+Headroom is now **Tokenroom**. On first launch Tokenroom brings over Headroom’s settings and last readings, and offers to quit Headroom.
+
+### Changes
+- Tokenroom only reads other tools’ sessions. It no longer refreshes Claude or Grok tokens or writes them back, so it can’t break a Claude Code or Grok CLI session. An expired session keeps its last reading, faded, for up to a day.
+- Providers that answer “too many requests” are left alone until their Retry-After passes.
+- Grok Bot off a Cursor plan says so instead of asking you to sign in.
+- Requests identify themselves as Tokenroom.
+
+### Fixes
+- The app could freeze while waiting on the Keychain during Claude sign-in.
+- Keychain, file, and database reads no longer run on the main thread.
+- Turning Grok Bot off now survives a relaunch, and turning every provider off stays off.
+- A damaged cache entry no longer wipes the other readings.
+- “Last good reading” shows when the reading was last confirmed, not when it first appeared.
+- A failed Xcode build no longer installs anything. The Command Line Tools build works again and reports the right version.
+
 ## 1.2.2 — 2026-09-23
 
 ### Fixes

@@ -1,0 +1,4 @@
+// Versions. The Mac collector is versioned on its own.
+// scripts/build.sh reads these for the swiftc fallback.
+TOKENROOM_MAC_VERSION = 2.0.0
+TOKENROOM_MAC_BUILD = 1

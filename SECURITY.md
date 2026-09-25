@@ -1,11 +1,11 @@
 # Security
 
-Headroom is a local macOS extra. It has no account and no server.
+Tokenroom is a local macOS extra. It has no account and no server.
 
 ## What to report
 
 - Unexpected network destinations
-- Token, email, or name persistence in Headroom storage or logs
+- Token, email, or name persistence in Tokenroom storage or logs
 - A way to read another user's session files
 
 ## What not to report
