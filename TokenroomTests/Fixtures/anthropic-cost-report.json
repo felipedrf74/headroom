@@ -1,0 +1,4 @@
+{ "has_more": false, "next_page": null,
+  "data": [ { "starting_at": "2026-09-01T00:00:00Z", "ending_at": "2026-09-02T00:00:00Z",
+    "results": [ { "currency": "USD", "amount": "1234.5", "workspace_id": null, "description": null, "cost_type": "tokens" },
+                 { "currency": "USD", "amount": "100", "workspace_id": null, "description": null, "cost_type": "web_search" } ] } ] }

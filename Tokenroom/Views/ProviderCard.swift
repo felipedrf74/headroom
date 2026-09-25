@@ -136,6 +136,8 @@ struct ProviderCard: View {
         }
         if snapshot.source == "bridge" {
             caption("via Claude Code · \(RelativeTime.ago(snapshot.fetchedAt))")
+        } else if let source = LocalKeys.caption(forSource: snapshot.source) {
+            caption(source)
         }
         if let banked = snapshot.banked {
             caption(Self.bankedText(banked))

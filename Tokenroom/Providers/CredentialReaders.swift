@@ -2,7 +2,6 @@ import Foundation
 import LocalAuthentication
 import os
 import Security
-import SQLite3
 
 /// Reads sessions that the official CLIs and apps already keep on this Mac.
 /// Everything here is read-only: Tokenroom never refreshes or rewrites another tool's tokens.
@@ -141,9 +140,21 @@ enum CredentialReaders {
             guard let raw = readClaudeRawFromKeychain() else { return nil }
             let checksum = raw.utf8.reduce(into: 0) { sum, byte in sum = sum &+ Int(byte) }
             return "\(raw.count)-\(checksum)"
-        case .openrouter, .deepseek, .moonshot, .vercelGateway:
-            return apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
+        case .copilot:
+            return CopilotCredentials.sessionStamp()
+        case .antigravity:
+            return AntigravityClient.sessionStamp()
+        case .devin:
+            return DevinCredentials.sessionStamp()
+        case .zai, .kimiCode, .minimax, .opencodeGo:
+            return pastedKeyStamp(provider) ?? LocalKeys.sourceFile(for: provider).flatMap(fileStamp)
+        case .openrouter, .deepseek, .moonshot, .vercelGateway, .openaiOrg, .anthropicOrg, .xaiOrg:
+            return pastedKeyStamp(provider)
         }
+    }
+
+    private static func pastedKeyStamp(_ provider: Provider) -> String? {
+        apiKeys.metadata(for: provider).map { "\($0.last4)-\(Int($0.addedAt.timeIntervalSince1970))" }
     }
 
     /// Forgets cached tokens so the next read sees what the CLIs wrote since.
@@ -151,6 +162,7 @@ enum CredentialReaders {
     static func invalidateCaches() {
         claudeCache.withLock { $0 = nil }
         cursorCache.withLock { $0 = nil }
+        CopilotCredentials.invalidate()
     }
 
     static func invalidateKeychainServices() {
@@ -158,11 +170,7 @@ enum CredentialReaders {
     }
 
     private static func fileStamp(_ url: URL) -> String? {
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
-              let modified = values.contentModificationDate
-        else { return nil }
-        let size = values.fileSize ?? 0
-        return "\(Int(modified.timeIntervalSince1970))-\(size)"
+        LocalSources.fileStamp(url)
     }
 
     static func codexAuth() throws -> CodexAuth {
@@ -316,6 +324,12 @@ enum CredentialReaders {
         return list
     }
 
+    /// A generic password through `/usr/bin/security`, for items another CLI created with it (gh
+    /// through go-keyring, Claude Code): their access lists trust that tool, so no prompt.
+    static func securityGenericPassword(service: String, account: String?) -> String? {
+        securityPassword(service: service, account: account)
+    }
+
     private static func securityPassword(service: String, account: String?) -> String? {
         var args = ["find-generic-password", "-s", service, "-w"]
         if let account {
@@ -340,20 +354,9 @@ enum CredentialReaders {
         if let cached = cursorCache.withLock({ $0 }), Date().timeIntervalSince(cached.readAt) < 20 {
             return cached.token
         }
-        let path = cursorDatabaseURL.path
-        if FileManager.default.fileExists(atPath: path) {
-            if let token = sqliteCursorToken(at: path) {
-                cursorCache.withLock { $0 = (token, Date()) }
-                return token
-            }
-            // A busy database can refuse a read-only open; a copy can still be read.
-            if let copy = copyCursorDatabase() {
-                defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
-                if let token = sqliteCursorToken(at: copy.path) {
-                    cursorCache.withLock { $0 = (token, Date()) }
-                    return token
-                }
-            }
+        if let token = LocalSources.vscodeState("cursorAuth/accessToken", database: cursorDatabaseURL) {
+            cursorCache.withLock { $0 = (token, Date()) }
+            return token
         }
         // Cursor 3.9 and later keep the token in the Keychain instead.
         if let token = keychainPassword(service: cursorKeychainService, promptAllowed: false), !token.isEmpty {
@@ -370,58 +373,6 @@ enum CredentialReaders {
         let wal = fileStamp(URL(fileURLWithPath: cursorDatabaseURL.path + "-wal"))
         if db == nil, wal == nil { return nil }
         return [db, wal].compactMap { $0 }.joined(separator: ":")
-    }
-
-    private static func sqliteCursorToken(at path: String) -> String? {
-        var database: OpaquePointer?
-        let encoded = path.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "?"))) ?? path
-        let uri = "file://\(encoded)?mode=ro"
-        let uriFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
-        if sqlite3_open_v2(uri, &database, uriFlags, nil) != SQLITE_OK {
-            if let database { sqlite3_close(database) }
-            database = nil
-            if sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
-                if let database { sqlite3_close(database) }
-                return nil
-            }
-        }
-        guard let database else { return nil }
-        defer { sqlite3_close(database) }
-        sqlite3_busy_timeout(database, 1_500)
-        _ = sqlite3_exec(database, "PRAGMA query_only = ON", nil, nil, nil)
-
-        let sql = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1"
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            return nil
-        }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_text(statement, 0) else {
-            return nil
-        }
-        let token = String(cString: bytes)
-        return token.isEmpty ? nil : token
-    }
-
-    private static func copyCursorDatabase() -> URL? {
-        let src = cursorDatabaseURL
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TokenroomCursor-\(UUID().uuidString)", isDirectory: true)
-        let dest = folder.appendingPathComponent("state.vscdb")
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: src, to: dest)
-            for suffix in ["-wal", "-shm"] {
-                let extra = URL(fileURLWithPath: src.path + suffix)
-                if FileManager.default.fileExists(atPath: extra.path) {
-                    try FileManager.default.copyItem(at: extra, to: URL(fileURLWithPath: dest.path + suffix))
-                }
-            }
-            return dest
-        } catch {
-            try? FileManager.default.removeItem(at: folder)
-            return nil
-        }
     }
 
     /// - Parameter promptAllowed: false fails quietly instead of asking for Keychain access,

@@ -1,0 +1,48 @@
+{
+  "status": "SUCCESS",
+  "conversation_id": "",
+  "num_turns": 0,
+  "command": {
+    "name": "usage",
+    "data": {
+      "description": "Models share limits",
+      "groups": [
+        {
+          "name": "Gemini Models",
+          "buckets": [
+            {
+              "id": "gemini-5h",
+              "name": "Five Hour Limit Remaining",
+              "window": "5h",
+              "remaining_fraction": 0.95,
+              "reset_time": "2026-09-25T15:00:00Z"
+            },
+            {
+              "id": "gemini-weekly",
+              "name": "Weekly Limit Remaining",
+              "window": "weekly",
+              "remaining_fraction": 0.86,
+              "reset_time": "2026-09-29T12:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "Claude and GPT models",
+          "buckets": [
+            {
+              "id": "3p-5h",
+              "window": "5h",
+              "remaining_fraction": 1.0,
+              "reset_time": "2026-09-25T17:00:00Z"
+            },
+            {
+              "id": "3p-weekly",
+              "window": "weekly",
+              "reset_time": "2026-09-29T12:00:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

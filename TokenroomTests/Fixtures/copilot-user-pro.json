@@ -1,0 +1,55 @@
+{
+  "login": "octocat-placeholder",
+  "id": 1,
+  "analytics_tracking_id": "placeholder",
+  "organization_login_list": [],
+  "organization_list": [],
+  "access_type_sku": "monthly_subscriber_quota",
+  "copilot_plan": "individual",
+  "token_based_billing": false,
+  "quota_reset_date": "2026-10-01",
+  "quota_snapshots": {
+    "premium_interactions": {
+      "entitlement": 300,
+      "remaining": -12,
+      "quota_remaining": -12.0,
+      "percent_remaining": -4.0,
+      "unlimited": false,
+      "overage_permitted": true,
+      "overage_count": 12,
+      "credits_used": 0,
+      "has_quota": true,
+      "quota_id": "premium_interactions",
+      "quota_reset_at": 0,
+      "timestamp_utc": "2026-09-25T11:58:00.000Z"
+    },
+    "chat": {
+      "entitlement": -1,
+      "remaining": -1,
+      "quota_remaining": -1.0,
+      "percent_remaining": 100.0,
+      "unlimited": true,
+      "overage_permitted": false,
+      "overage_count": 0,
+      "credits_used": 0,
+      "has_quota": true,
+      "quota_id": "chat",
+      "quota_reset_at": 0,
+      "timestamp_utc": "2026-09-25T11:58:00.000Z"
+    },
+    "completions": {
+      "entitlement": -1,
+      "remaining": -1,
+      "quota_remaining": -1.0,
+      "percent_remaining": 100.0,
+      "unlimited": true,
+      "overage_permitted": false,
+      "overage_count": 0,
+      "credits_used": 0,
+      "has_quota": true,
+      "quota_id": "completions",
+      "quota_reset_at": 0,
+      "timestamp_utc": "2026-09-25T11:58:00.000Z"
+    }
+  }
+}

@@ -37,6 +37,11 @@ final class AppSettings {
         didSet { persist() }
     }
 
+    /// Dollar budgets that turn spend and balances into meters.
+    var budgets: [Provider: Double] {
+        didSet { persist() }
+    }
+
     var launchAtLogin: Bool {
         didSet { applyLaunchAtLogin() }
     }
@@ -57,6 +62,7 @@ final class AppSettings {
         static let refreshMinutes = "refreshMinutes"
         static let menuStyle = "menuStyle"
         static let hiddenFromMenuBar = "menuBarHidden"
+        static let budgets = "budgets"
     }
 
     static let currentVersion = 2
@@ -74,9 +80,28 @@ final class AppSettings {
             menuStyle = .meters
         }
         hiddenFromMenuBar = Set((defaults.array(forKey: Keys.hiddenFromMenuBar) as? [String] ?? []).compactMap(Provider.init(rawValue:)))
+        var budgets: [Provider: Double] = [:]
+        for (key, value) in defaults.dictionary(forKey: Keys.budgets) as? [String: Double] ?? [:] {
+            if let provider = Provider(rawValue: key), value > 0 {
+                budgets[provider] = value
+            }
+        }
+        self.budgets = budgets
         launchAtLogin = SMAppService.mainApp.status == .enabled
         isReady = true
         persist()
+    }
+
+    func budget(for provider: Provider) -> Double? {
+        budgets[provider]
+    }
+
+    func setBudget(_ value: Double?, for provider: Provider) {
+        if let value, value > 0 {
+            budgets[provider] = value
+        } else {
+            budgets.removeValue(forKey: provider)
+        }
     }
 
     func showsInMenuBar(_ provider: Provider) -> Bool {
@@ -135,6 +160,7 @@ final class AppSettings {
         defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
         defaults.set(menuStyle.rawValue, forKey: Keys.menuStyle)
         defaults.set(hiddenFromMenuBar.map(\.rawValue).sorted(), forKey: Keys.hiddenFromMenuBar)
+        defaults.set(Dictionary(uniqueKeysWithValues: budgets.map { ($0.key.rawValue, $0.value) }), forKey: Keys.budgets)
     }
 
     private func applyLaunchAtLogin() {

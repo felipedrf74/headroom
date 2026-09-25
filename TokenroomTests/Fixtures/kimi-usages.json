@@ -1,0 +1,38 @@
+{
+  "user": {
+    "membership": {
+      "level": "LEVEL_INTERMEDIATE"
+    }
+  },
+  "version": "GOODS_VERSION_V1",
+  "usages": {
+    "limit_5h": {
+      "used_ratio": 0.625,
+      "reset_time": "2026-09-25T15:00:00Z"
+    },
+    "limit_7d": {
+      "used_ratio": "0.125",
+      "reset_time": "2026-09-29T12:00:00.716839300Z"
+    },
+    "limit_month_total": {
+      "used_ratio": 0.0056,
+      "reset_time": "2026-10-17T12:00:00Z"
+    }
+  },
+  "boosterWallet": {
+    "balance": {
+      "type": "BOOSTER",
+      "amount": "2000000000",
+      "amountLeft": "1234000000"
+    },
+    "monthlyChargeLimitEnabled": true,
+    "monthlyChargeLimit": {
+      "priceInCents": "5000",
+      "currency": "USD"
+    },
+    "monthlyUsed": {
+      "priceInCents": "766",
+      "currency": "USD"
+    }
+  }
+}

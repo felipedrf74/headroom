@@ -1,0 +1,12 @@
+{
+  "userStatus": {
+    "planStatus": {
+      "planInfo": {
+        "planName": "Free",
+        "hideDailyQuota": true
+      },
+      "weeklyQuotaResetAtUnix": "1790510400",
+      "overageBalanceMicros": "-5000000"
+    }
+  }
+}

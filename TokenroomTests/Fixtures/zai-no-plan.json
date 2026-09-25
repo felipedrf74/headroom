@@ -1,0 +1,5 @@
+{
+  "code": 500,
+  "msg": "The current API key has no GLM Coding Plan subscription",
+  "success": false
+}

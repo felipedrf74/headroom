@@ -4,11 +4,31 @@
 
 Headroom is now **Tokenroom**. On first launch Tokenroom brings over Headroom’s settings and last readings, and offers to quit Headroom.
 
+### New providers
+- **GitHub Copilot**, with the login Copilot’s editor extensions or the gh CLI already keep.
+- **Antigravity**, through `agy` 1.1.11 or later.
+- **Devin** (formerly Windsurf).
+- **Coding plans:** Z.ai, Kimi Code, MiniMax, and OpenCode Go. Tokenroom uses the key Claude Code, the kimi CLI, or OpenCode already has, or one you add.
+- **Pay as you go:** OpenRouter, DeepSeek, Moonshot, and Vercel AI Gateway, with an API key you add. A budget turns a balance into a meter.
+- **Organization billing:** this month’s OpenAI, Anthropic, and xAI spend with an admin or management key, against a monthly budget.
+
+API keys stay in the Mac’s Keychain; only the last four characters are shown.
+
+### Richer readings
+- Codex: plan, credits, spend limit, named limits, and banked resets.
+- Claude: per-model caps and extra usage. An optional Claude Code status-line bridge keeps Claude’s meters current when the direct read can’t.
+- Cursor 3.9 and later: the login in the Keychain. Grok: your plan’s name.
+
+### Menu bar and settings
+- Settings has Providers, Menu Bar, iPhone & Watch, and General tabs.
+- Any provider can be left out of the menu bar, and the **Highest** style shows only the most-used meter.
+- The popover lists connected providers first and folds the rest under “Not connected”.
+
 ### Changes
 - Tokenroom only reads other tools’ sessions. It no longer refreshes Claude or Grok tokens or writes them back, so it can’t break a Claude Code or Grok CLI session. An expired session keeps its last reading, faded, for up to a day.
 - Providers that answer “too many requests” are left alone until their Retry-After passes.
 - Grok Bot off a Cursor plan says so instead of asking you to sign in.
-- Requests identify themselves as Tokenroom.
+- Requests identify themselves as Tokenroom, except where a provider only answers its own client (Claude, Devin).
 
 ### Fixes
 - The app could freeze while waiting on the Keychain during Claude sign-in.

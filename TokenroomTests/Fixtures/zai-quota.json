@@ -1,0 +1,50 @@
+{
+  "code": 200,
+  "msg": "Operation successful",
+  "success": true,
+  "data": {
+    "level": "pro",
+    "limits": [
+      {
+        "type": "CREDIT_LIMIT",
+        "unit": 3,
+        "number": 5,
+        "usage": 2000,
+        "currentValue": 340,
+        "remaining": 1660,
+        "percentage": 17,
+        "nextResetTime": 1790344800000
+      },
+      {
+        "type": "CREDIT_LIMIT",
+        "unit": 6,
+        "number": 1,
+        "usage": 10000,
+        "currentValue": 2550,
+        "remaining": 7450,
+        "percentage": 25,
+        "nextResetTime": 1790596800000
+      },
+      {
+        "type": "TIME_LIMIT",
+        "unit": 5,
+        "number": 1,
+        "usage": 1000,
+        "currentValue": 12,
+        "remaining": 988,
+        "percentage": 1,
+        "nextResetTime": 1790856000000,
+        "usageDetails": [
+          {
+            "modelCode": "search-prime",
+            "usage": 10
+          },
+          {
+            "modelCode": "web-reader",
+            "usage": 2
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -6,7 +6,12 @@ enum JSONFlex {
         private let fractional: ISO8601DateFormatter
         private let basic: ISO8601DateFormatter
 
+        private let day: ISO8601DateFormatter
+
         init() {
+            let day = ISO8601DateFormatter()
+            day.formatOptions = [.withFullDate]
+            self.day = day
             let fractional = ISO8601DateFormatter()
             fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             self.fractional = fractional
@@ -18,7 +23,11 @@ enum JSONFlex {
         func date(from string: String) -> Date? {
             lock.lock()
             defer { lock.unlock() }
-            return fractional.date(from: string) ?? basic.date(from: string)
+            if let date = fractional.date(from: string) ?? basic.date(from: string) {
+                return date
+            }
+            // Date-only values (`2026-10-01`) mean midnight UTC.
+            return string.count == 10 ? day.date(from: string) : nil
         }
 
         func string(from date: Date) -> String {

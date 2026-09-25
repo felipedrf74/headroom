@@ -1,0 +1,16 @@
+{
+  "userStatus": {
+    "planStatus": {
+      "planInfo": {
+        "planName": "Pro",
+        "billingStrategy": "BILLING_STRATEGY_QUOTA",
+        "hideDailyQuota": false
+      },
+      "dailyQuotaRemainingPercent": 100,
+      "weeklyQuotaRemainingPercent": 40,
+      "dailyQuotaResetAtUnix": "1790373600",
+      "weeklyQuotaResetAtUnix": "1790596800",
+      "overageBalanceMicros": "964220000"
+    }
+  }
+}
