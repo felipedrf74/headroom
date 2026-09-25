@@ -26,7 +26,11 @@ struct SettingsView: View {
             } header: {
                 Text("Accounts")
             } footer: {
-                Text("Tokenroom reuses the login you already have for each tool. Percentages stay on this Mac. Tokens, names, and emails are not stored.")
+                Text("Tokenroom reuses the login you already have for each tool. Tokens, names, and emails are never stored or sent anywhere.")
+            }
+
+            if let relay = store.relay {
+                RelaySettingsSection(relay: relay)
             }
 
             Section("Menu bar") {
@@ -106,5 +110,34 @@ struct SettingsView: View {
             get: { store.settings.isEnabled(provider) },
             set: { store.settings.setEnabled(provider, $0) }
         )
+    }
+}
+
+private struct RelaySettingsSection: View {
+    @Bindable var relay: RelayPublisher
+    @State private var sendingTest = false
+
+    var body: some View {
+        Section {
+            if relay.isAvailable {
+                Toggle("Send readings to iCloud", isOn: $relay.isEnabled)
+                TextField("Name on iPhone", text: $relay.label)
+                Button("Send Test Alert") {
+                    sendingTest = true
+                    Task {
+                        await relay.sendTestAlert()
+                        sendingTest = false
+                    }
+                }
+                .disabled(!relay.isEnabled || sendingTest)
+            }
+            Text(relay.statusText)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("iPhone & Apple Watch")
+        } footer: {
+            Text("Only percentages, reset times, window labels, and plan names go to your private iCloud. Tokens never leave this Mac.")
+        }
     }
 }

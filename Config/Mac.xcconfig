@@ -6,7 +6,8 @@ MARKETING_VERSION = $(TOKENROOM_MAC_VERSION)
 CURRENT_PROJECT_VERSION = $(TOKENROOM_MAC_BUILD)
 
 TOKENROOM_MAC_ENTITLEMENTS_adhoc = Tokenroom/Tokenroom.entitlements
-TOKENROOM_MAC_ENTITLEMENTS_team = Tokenroom/Tokenroom.entitlements
+// Team builds carry iCloud (CloudKit) so the Mac can relay readings to iPhone and Apple Watch.
+TOKENROOM_MAC_ENTITLEMENTS_team = Tokenroom/TokenroomCloud.entitlements
 CODE_SIGN_ENTITLEMENTS = $(TOKENROOM_MAC_ENTITLEMENTS_$(TOKENROOM_MAC_SIGNING))
 
 #include "MacSigning.xcconfig"

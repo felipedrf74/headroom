@@ -1,0 +1,217 @@
+import CloudKit
+import Foundation
+
+/// Tokenroom's records in the user's private CloudKit database, zone "Tokenroom".
+///
+/// - `Source`: one per collector (a Mac, or an iPhone with API keys). Only that collector writes it,
+///   so saves never conflict. `payload` is a JSON `RelayEnvelope`.
+/// - `Event`: an alert (threshold crossed, test). The iPhone's query subscription turns each new
+///   one into a visible notification, even when the app isn't running.
+actor CloudRelay {
+    enum RecordType {
+        static let source = "Source"
+        static let event = "Event"
+    }
+
+    enum Field {
+        static let payload = "payload"
+        static let kind = "kind"
+        static let label = "label"
+        static let checkedAt = "checkedAt"
+        static let schema = "schema"
+        static let appVersion = "appVersion"
+        static let provider = "provider"
+        static let level = "level"
+        static let title = "title"
+        static let body = "body"
+        static let resetsAt = "resetsAt"
+    }
+
+    static let zoneID = CKRecordZone.ID(zoneName: "Tokenroom", ownerName: CKCurrentUserDefaultName)
+
+    struct Source: Sendable, Identifiable {
+        var id: String
+        var kind: String
+        var label: String
+        var modifiedAt: Date?
+        /// Nil when the payload is damaged or from a newer format this build can't read.
+        var envelope: RelayEnvelope?
+        var needsNewerApp: Bool
+    }
+
+    let containerIdentifier: String
+    private let container: CKContainer
+    private var zoneReady = false
+
+    private var database: CKDatabase {
+        container.privateCloudDatabase
+    }
+
+    /// Only call when `RelayAvailability` reports the container; CloudKit traps without the entitlement.
+    init(containerIdentifier: String) {
+        self.containerIdentifier = containerIdentifier
+        container = CKContainer(identifier: containerIdentifier)
+    }
+
+    func accountStatus() async throws -> CKAccountStatus {
+        try await container.accountStatus()
+    }
+
+    func publish(sourceID: String, kind: String, label: String, envelope: RelayEnvelope) async throws {
+        let record = CKRecord(
+            recordType: RecordType.source,
+            recordID: CKRecord.ID(recordName: sourceID, zoneID: Self.zoneID)
+        )
+        record[Field.payload] = try envelope.encoded()
+        record[Field.kind] = kind
+        record[Field.label] = label
+        record[Field.checkedAt] = envelope.checkedAt
+        record[Field.schema] = envelope.v
+        record[Field.appVersion] = envelope.appVersion
+        try await save([record])
+    }
+
+    /// Record names are deterministic, so two Macs seeing the same crossing create one alert.
+    func saveEvent(
+        id: String,
+        provider: String,
+        level: Int,
+        title: String,
+        body: String,
+        resetsAt: Date? = nil
+    ) async throws {
+        let record = CKRecord(recordType: RecordType.event, recordID: CKRecord.ID(recordName: id, zoneID: Self.zoneID))
+        record[Field.provider] = provider
+        record[Field.level] = level
+        record[Field.title] = title
+        record[Field.body] = body
+        record[Field.resetsAt] = resetsAt
+        try await save([record])
+    }
+
+    /// Every source in the zone. A handful of small records, so no change tokens are kept.
+    func sources() async throws -> [Source] {
+        var result: [Source] = []
+        var token: CKServerChangeToken?
+        do {
+            while true {
+                let changes = try await database.recordZoneChanges(inZoneWith: Self.zoneID, since: token)
+                for (_, modification) in changes.modificationResultsByID {
+                    guard case .success(let change) = modification,
+                          change.record.recordType == RecordType.source
+                    else { continue }
+                    result.append(Self.source(from: change.record))
+                }
+                token = changes.changeToken
+                if !changes.moreComing { break }
+            }
+        } catch let error as CKError where error.code == .zoneNotFound {
+            return []
+        }
+        return result
+    }
+
+    func deleteAllData() async throws {
+        _ = try await database.modifyRecordZones(saving: [], deleting: [Self.zoneID])
+        zoneReady = false
+    }
+
+    private static func source(from record: CKRecord) -> Source {
+        var envelope: RelayEnvelope?
+        var needsNewerApp = false
+        if let data = record[Field.payload] as? Data, let decoded = try? RelayEnvelope.decode(data) {
+            if decoded.isReadable {
+                envelope = decoded
+            } else {
+                needsNewerApp = true
+            }
+        }
+        return Source(
+            id: record.recordID.recordName,
+            kind: record[Field.kind] as? String ?? "mac",
+            label: record[Field.label] as? String ?? "Mac",
+            modifiedAt: record.modificationDate,
+            envelope: envelope,
+            needsNewerApp: needsNewerApp
+        )
+    }
+
+    private func save(_ records: [CKRecord]) async throws {
+        try await ensureZone()
+        do {
+            try await modify(records)
+        } catch let error as CKError where error.code == .zoneNotFound {
+            zoneReady = false
+            try await ensureZone()
+            try await modify(records)
+        }
+    }
+
+    private func modify(_ records: [CKRecord]) async throws {
+        let results = try await database.modifyRecords(
+            saving: records,
+            deleting: [],
+            savePolicy: .allKeys,
+            atomically: true
+        )
+        for (_, result) in results.saveResults {
+            if case .failure(let error) = result {
+                throw error
+            }
+        }
+    }
+
+    private func ensureZone() async throws {
+        guard !zoneReady else { return }
+        let results = try await database.modifyRecordZones(saving: [CKRecordZone(zoneID: Self.zoneID)], deleting: [])
+        for (_, result) in results.saveResults {
+            if case .failure(let error) = result {
+                throw error
+            }
+        }
+        zoneReady = true
+    }
+}
+
+#if os(iOS)
+extension CloudRelay {
+    static let changesSubscriptionID = "tokenroom-sources"
+    static let alertsSubscriptionID = "tokenroom-alerts"
+
+    /// Silent pushes when any source changes; visible notifications for new alert events.
+    /// Saving the same IDs again replaces them, so this is safe on every launch.
+    func ensureSubscriptions() async throws {
+        try await ensureZone()
+
+        let changes = CKRecordZoneSubscription(zoneID: Self.zoneID, subscriptionID: Self.changesSubscriptionID)
+        changes.recordType = RecordType.source
+        let silent = CKSubscription.NotificationInfo()
+        silent.shouldSendContentAvailable = true
+        changes.notificationInfo = silent
+
+        let alerts = CKQuerySubscription(
+            recordType: RecordType.event,
+            predicate: NSPredicate(value: true),
+            subscriptionID: Self.alertsSubscriptionID,
+            options: [.firesOnRecordCreation]
+        )
+        alerts.zoneID = Self.zoneID
+        let visible = CKSubscription.NotificationInfo()
+        // A format-only key makes iOS show the record's own title and body.
+        visible.titleLocalizationKey = "%1$@"
+        visible.titleLocalizationArgs = [Field.title]
+        visible.alertLocalizationKey = "%1$@"
+        visible.alertLocalizationArgs = [Field.body]
+        visible.soundName = "default"
+        visible.collapseIDKey = Field.provider
+        alerts.notificationInfo = visible
+
+        let results = try await database.modifySubscriptions(saving: [changes, alerts], deleting: [])
+        for (_, result) in results.saveResults {
+            if case .failure(let error) = result {
+                throw error
+            }
+        }
+    }
+}
+#endif
