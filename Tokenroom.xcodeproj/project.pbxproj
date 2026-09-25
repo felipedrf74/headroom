@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E10000000000000000000004 /* TokenroomWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* TokenroomWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		AA0000000000000000000017 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -14,7 +18,28 @@
 			remoteGlobalIDString = AA0000000000000000000002;
 			remoteInfo = Tokenroom;
 		};
+		E10000000000000000000005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000008 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E10000000000000000000010;
+			remoteInfo = TokenroomWidgets;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D10000000000000000000014 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				E10000000000000000000004 /* TokenroomWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000004 /* Tokenroom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tokenroom.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -27,6 +52,8 @@
 		CF0000000000000000000006 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Local.xcconfig.example; sourceTree = "<group>"; };
 		D10000000000000000000001 /* TokenroomMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TokenroomMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF0000000000000000000007 /* Mobile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Mobile.xcconfig; sourceTree = "<group>"; };
+		CF0000000000000000000008 /* Widgets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Widgets.xcconfig; sourceTree = "<group>"; };
+		E10000000000000000000001 /* TokenroomWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TokenroomWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +63,13 @@
 				Info.plist,
 			);
 			target = D10000000000000000000010 /* TokenroomMobile */;
+		};
+		E10000000000000000000003 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E10000000000000000000010 /* TokenroomWidgets */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -70,12 +104,25 @@
 			path = APIKeys;
 			sourceTree = "<group>";
 		};
+		5A0000000000000000000005 /* Widgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Widgets;
+			sourceTree = "<group>";
+		};
 		D10000000000000000000002 /* TokenroomMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				D10000000000000000000003 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			path = TokenroomMobile;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000002 /* TokenroomWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E10000000000000000000003 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
+			path = TokenroomWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -102,6 +149,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E10000000000000000000012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -113,6 +167,7 @@
 				AA0000000000000000000006 /* Tokenroom */,
 				AA0000000000000000000007 /* TokenroomTests */,
 				D10000000000000000000002 /* TokenroomMobile */,
+				E10000000000000000000002 /* TokenroomWidgets */,
 				AA0000000000000000000010 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -123,6 +178,7 @@
 				AA0000000000000000000004 /* Tokenroom.app */,
 				AA0000000000000000000005 /* TokenroomTests.xctest */,
 				D10000000000000000000001 /* TokenroomMobile.app */,
+				E10000000000000000000001 /* TokenroomWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -136,6 +192,7 @@
 				CF0000000000000000000004 /* Mac.xcconfig */,
 				CF0000000000000000000005 /* MacTests.xcconfig */,
 				CF0000000000000000000007 /* Mobile.xcconfig */,
+				CF0000000000000000000008 /* Widgets.xcconfig */,
 				CF0000000000000000000006 /* Local.xcconfig.example */,
 			);
 			path = Config;
@@ -148,6 +205,7 @@
 				5A0000000000000000000002 /* Relay */,
 				5A0000000000000000000003 /* UI */,
 				5A0000000000000000000004 /* APIKeys */,
+				5A0000000000000000000005 /* Widgets */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -207,10 +265,12 @@
 				D10000000000000000000011 /* Sources */,
 				D10000000000000000000012 /* Frameworks */,
 				D10000000000000000000013 /* Resources */,
+				D10000000000000000000014 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E10000000000000000000006 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				D10000000000000000000002 /* TokenroomMobile */,
@@ -218,11 +278,37 @@
 				5A0000000000000000000002 /* Relay */,
 				5A0000000000000000000003 /* UI */,
 				5A0000000000000000000004 /* APIKeys */,
+				5A0000000000000000000005 /* Widgets */,
 			);
 			name = TokenroomMobile;
 			productName = TokenroomMobile;
 			productReference = D10000000000000000000001 /* TokenroomMobile.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E10000000000000000000010 /* TokenroomWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000020 /* Build configuration list for PBXNativeTarget "TokenroomWidgets" */;
+			buildPhases = (
+				E10000000000000000000011 /* Sources */,
+				E10000000000000000000012 /* Frameworks */,
+				E10000000000000000000013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E10000000000000000000002 /* TokenroomWidgets */,
+				5A0000000000000000000001 /* Core */,
+				5A0000000000000000000002 /* Relay */,
+				5A0000000000000000000003 /* UI */,
+				5A0000000000000000000004 /* APIKeys */,
+				5A0000000000000000000005 /* Widgets */,
+			);
+			name = TokenroomWidgets;
+			productName = TokenroomWidgets;
+			productReference = E10000000000000000000001 /* TokenroomWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -244,6 +330,9 @@
 					D10000000000000000000010 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					E10000000000000000000010 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = BB0000000000000000000001 /* Build configuration list for PBXProject "Tokenroom" */;
@@ -263,6 +352,7 @@
 				AA0000000000000000000002 /* Tokenroom */,
 				AA0000000000000000000003 /* TokenroomTests */,
 				D10000000000000000000010 /* TokenroomMobile */,
+				E10000000000000000000010 /* TokenroomWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -283,6 +373,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D10000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000013 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -313,6 +410,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E10000000000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -320,6 +424,11 @@
 			isa = PBXTargetDependency;
 			target = AA0000000000000000000002 /* Tokenroom */;
 			targetProxy = AA0000000000000000000017 /* PBXContainerItemProxy */;
+		};
+		E10000000000000000000006 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E10000000000000000000010 /* TokenroomWidgets */;
+			targetProxy = E10000000000000000000005 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -458,6 +567,20 @@
 			};
 			name = Release;
 		};
+		E10000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000008 /* Widgets.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		E10000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CF0000000000000000000008 /* Widgets.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -493,6 +616,15 @@
 			buildConfigurations = (
 				D10000000000000000000021 /* Debug */,
 				D10000000000000000000022 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E10000000000000000000020 /* Build configuration list for PBXNativeTarget "TokenroomWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000021 /* Debug */,
+				E10000000000000000000022 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

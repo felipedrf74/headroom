@@ -16,8 +16,13 @@ struct TokenroomMobileApp: App {
                     await store.prepareNotifications()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch phase {
+                    case .active:
                         Task { await store.refresh() }
+                    case .background:
+                        Task { await store.scheduleBackgroundRefresh() }
+                    default:
+                        break
                     }
                 }
                 .onChange(of: store.hasOnboarded, initial: true) { _, onboarded in
@@ -25,6 +30,9 @@ struct TokenroomMobileApp: App {
                     guard onboarded, !store.sampleMode else { return }
                     Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
                 }
+        }
+        .backgroundTask(.appRefresh(MobileStore.backgroundTaskID)) {
+            await store.backgroundRefresh()
         }
     }
 }

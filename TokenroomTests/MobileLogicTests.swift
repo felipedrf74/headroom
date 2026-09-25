@@ -121,6 +121,40 @@ final class MobileLogicTests: XCTestCase {
         XCTAssertNil(ReadingCache.load(from: url), "A cache from a newer version isn't misread")
     }
 
+    // MARK: Assembling readings for the app and widgets
+
+    func testAssemblerMergesSourcesWithTheirOwnHistory() {
+        let macProvider = RelayProvider(provider: .claude, status: .live(snapshot(.claude, used: 70)), checkedAt: now)
+        let phoneProvider = RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter, used: 20)), checkedAt: now)
+        let signedOut = RelayProvider(provider: .cursor, status: .signedOut("Sign in"), checkedAt: now)
+        var week = UsageHistory(endingAt: now)
+        week.record(70, at: now)
+        let output = ReadingAssembler.assemble(
+            sources: [
+                RelayMerge.Source(id: "mac", label: "Mac", envelope: RelayEnvelope(producer: "mac", appVersion: "1", checkedAt: now, providers: [macProvider, signedOut])),
+                RelayMerge.Source(id: "phone", label: "This iPhone", envelope: RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [phoneProvider])),
+            ],
+            histories: ["mac": RelayHistory(series: ["claude/weekly": week, "cursor/weekly": week])],
+            now: now
+        )
+        XCTAssertEqual(output.connected.map(\.id), ["claude", "openrouter"])
+        XCTAssertEqual(output.connected.map(\.source), ["Mac", "This iPhone"])
+        XCTAssertEqual(output.connected[0].history["weekly"], week, "Each reading keeps its own collector's history")
+        XCTAssertTrue(output.connected[1].history.isEmpty)
+        XCTAssertEqual(output.disconnected.map(\.id), ["cursor"])
+    }
+
+    func testReadingsRollOverAtReset() throws {
+        let item = try XCTUnwrap(SampleData.cache(now: now).items.first { $0.id == "claude" })
+        let session = try XCTUnwrap(item.provider.windows.first { $0.id == "session" }?.resetsAt)
+        let rolled = item.rolledOver(at: session.addingTimeInterval(1))
+        let rolledSession = try XCTUnwrap(rolled.provider.windows.first { $0.id == "session" })
+        XCTAssertEqual(rolledSession.used, 0, "A widget doesn't keep a full meter past the reset")
+        XCTAssertNil(rolledSession.resetsAt)
+        XCTAssertEqual(rolled.provider.windows.first { $0.id == "weekly" }?.used, 64, "Windows that haven't reset keep their reading")
+        XCTAssertEqual(item.rolledOver(at: now), item)
+    }
+
     // MARK: Deep links and text
 
     func testDeepLinksRoundTrip() {
