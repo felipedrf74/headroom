@@ -159,10 +159,7 @@ struct ProviderCard: View {
 
     /// "$12.40 left" for balances, "$3.10 spent" when only spend is known.
     static func amountHeadline(_ amount: QuotaAmount) -> String? {
-        if let remaining = amount.remainingOrComputed {
-            return AmountFormat.text(remaining, unit: amount.unit)
-        }
-        return amount.used.map { "\(AmountFormat.text($0, unit: amount.unit)) spent" }
+        ReadingText.amountHeadline(amount)
     }
 
     private func header(value: String?, remaining: Double, stale: Bool) -> some View {
@@ -179,14 +176,11 @@ struct ProviderCard: View {
     }
 
     static func bankedText(_ banked: BankedResets, now: Date = .now) -> String {
-        let count = banked.available == 1 ? "1 banked reset" : "\(banked.available) banked resets"
-        guard let next = banked.nextExpiry(after: now) else { return count }
-        return "\(count) · next expires \(next.formatted(.dateTime.month(.abbreviated).day()))"
+        ReadingText.banked(banked, now: now)
     }
 
     static func extraText(_ extra: ExtraUsage) -> String? {
-        guard extra.isEnabled, let remaining = extra.amount.remainingOrComputed else { return nil }
-        return "\(extra.title) · \(AmountFormat.text(remaining, unit: extra.amount.unit)) left"
+        ReadingText.extra(extra)
     }
 
     private func paceColor(_ severity: Pace.Severity) -> Color {

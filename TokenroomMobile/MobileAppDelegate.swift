@@ -1,7 +1,8 @@
 import UIKit
 import UserNotifications
 
-/// Registers for CloudKit pushes and refreshes when a Mac publishes new readings.
+/// Registers for CloudKit pushes and reads the relay when a Mac publishes new readings.
+@MainActor
 final class MobileAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var store: MobileStore?
 
@@ -19,7 +20,8 @@ final class MobileAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
         guard let store else { return .noData }
-        await store.refresh()
+        // A silent push only means a Mac sent readings; keys on this iPhone can wait.
+        await store.refresh(force: true, includeKeys: false)
         return .newData
     }
 

@@ -25,15 +25,12 @@ final class RelayPublisher {
         static let label = "relayLabel"
     }
 
-    /// Unchanged usage is re-sent at most this often, so the phone can tell the Mac is alive.
-    static let heartbeat: TimeInterval = 30 * 60
-    /// Changed usage is sent at most this often.
-    static let minimumInterval: TimeInterval = 5 * 60
-    /// A status change (expired, signed out) goes out sooner.
-    static let statusInterval: TimeInterval = 60
+    static let minimumInterval = RelayPublishPolicy.minimumInterval
 
     private(set) var state: State
-    private(set) var lastSent: Date?
+    var lastSent: Date? {
+        policy.lastSent
+    }
 
     var isEnabled: Bool {
         didSet {
@@ -42,7 +39,7 @@ final class RelayPublisher {
                 state = relay == nil ? .unavailable : .off
             } else if relay != nil, state == .off {
                 state = .waiting
-                lastHash = nil
+                policy.reset()
             }
         }
     }
@@ -50,15 +47,14 @@ final class RelayPublisher {
     var label: String {
         didSet {
             defaults.set(label, forKey: Keys.label)
-            lastHash = nil
+            policy.reset()
         }
     }
 
     let sourceID: String
     private let relay: CloudRelay?
     private let defaults: UserDefaults
-    private var lastHash: Int?
-    private var lastStates: [String: String] = [:]
+    private var policy = RelayPublishPolicy()
     private var retryAt: Date?
     private var lastHistoryHour: Date?
     private var loggedAccount = false
@@ -88,15 +84,7 @@ final class RelayPublisher {
     func publish(_ envelope: RelayEnvelope, force: Bool = false, now: Date = .now) async {
         guard let relay, isEnabled else { return }
         if let retryAt, retryAt > now, !force { return }
-        let hash = envelope.materialHash
-        let states = Dictionary(envelope.providers.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
-        let sinceLast = lastSent.map { now.timeIntervalSince($0) } ?? .infinity
-        let due = force
-            || lastHash == nil
-            || (hash != lastHash && states != lastStates && sinceLast >= Self.statusInterval)
-            || (hash != lastHash && sinceLast >= Self.minimumInterval)
-            || sinceLast >= Self.heartbeat
-        guard due else { return }
+        guard policy.isDue(envelope, force: force, now: now) else { return }
 
         do {
             if case .noAccount = state {
@@ -108,9 +96,7 @@ final class RelayPublisher {
                 loggedAccount = true
                 logger.notice("relay account \(fingerprint, privacy: .public)")
             }
-            lastHash = hash
-            lastStates = states
-            lastSent = now
+            policy.didSend(envelope, at: now)
             retryAt = nil
             state = .sent(now)
         } catch {

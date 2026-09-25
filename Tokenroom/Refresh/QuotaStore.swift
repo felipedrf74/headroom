@@ -21,9 +21,6 @@ final class QuotaStore {
     /// A week of hourly usage per window, next to the snapshot cache.
     let history: HistoryStore
 
-    /// How long an expired session keeps showing its last reading (faded).
-    static let expiredGrace: TimeInterval = 24 * 60 * 60
-
     private let clients: [Provider: any ProviderClient]
     private let cache: SnapshotCache
     private var rateLimitedUntil: [Provider: Date] = [:]
@@ -176,29 +173,7 @@ final class QuotaStore {
     /// Enabled providers as the iPhone and Watch will see them.
     func relayEnvelope(at now: Date) -> RelayEnvelope {
         let providers = Provider.allCases.filter { settings.isEnabled($0) }.map { provider in
-            let status = statuses[provider] ?? .loading
-            let snapshot = status.snapshot
-            return RelayProvider(
-                id: provider.rawValue,
-                name: provider.displayName,
-                shortName: provider.shortName,
-                monogram: provider.monogram,
-                tint: provider.tintHex,
-                state: Self.relayState(status),
-                message: Self.relayMessage(status, provider: provider),
-                checkedAt: checkedAt[provider],
-                fetchedAt: snapshot?.fetchedAt,
-                plan: snapshot?.planLabel,
-                primaryWindowID: snapshot?.windows.first?.id,
-                windows: snapshot?.windows.map {
-                    RelayWindow(
-                        id: $0.id, kind: $0.kind.rawValue, title: $0.title, used: $0.usedPercent, resetsAt: $0.resetsAt,
-                        periodSec: $0.windowSeconds, startsAt: $0.startsAt, amount: $0.amount, metered: $0.metered
-                    )
-                } ?? [],
-                banked: snapshot?.banked,
-                extra: snapshot?.extra
-            )
+            RelayProvider(provider: provider, status: statuses[provider] ?? .loading, checkedAt: checkedAt[provider])
         }
         return RelayEnvelope(
             producer: "mac",
@@ -206,32 +181,6 @@ final class QuotaStore {
             checkedAt: now,
             providers: providers
         )
-    }
-
-    private static func relayState(_ status: ProviderStatus) -> String {
-        switch status {
-        case .loading: "loading"
-        case .live: "live"
-        case .stale: "stale"
-        case .signedOut: "signedOut"
-        case .expired: "expired"
-        case .notEntitled: "notEntitled"
-        case .rateLimited: "rateLimited"
-        case .unreachable: "unreachable"
-        }
-    }
-
-    private static func relayMessage(_ status: ProviderStatus, provider: Provider) -> String? {
-        switch status {
-        case .signedOut(let hint), .expired(let hint, _), .notEntitled(let hint):
-            hint
-        case .rateLimited(let until, _):
-            "Couldn't refresh. \(provider.displayName) asked to wait until \(until.formatted(date: .omitted, time: .shortened))."
-        case .unreachable:
-            "Couldn't reach \(provider.displayName)."
-        case .loading, .live, .stale:
-            nil
-        }
     }
 
     var menuMeters: [MenuMeter] {
@@ -281,12 +230,7 @@ final class QuotaStore {
     }
 
     private func isDisconnected(_ provider: Provider) -> Bool {
-        switch statuses[provider] ?? .loading {
-        case .signedOut, .notEntitled, .expired(_, nil), .unreachable(nil):
-            true
-        default:
-            false
-        }
+        (statuses[provider] ?? .loading).isDisconnected
     }
 
     func accountCaption(_ provider: Provider) -> String {
@@ -389,25 +333,9 @@ final class QuotaStore {
             statuses[provider] = .live(snapshot)
             snapshotsDirty = true
         case .failure(let error):
-            let cached = statuses[provider]?.snapshot
-            let next: ProviderStatus
-            switch error {
-            case .signedOut(let hint):
-                next = .signedOut(hint)
-            case .notEntitled(let hint):
-                next = .notEntitled(hint)
-            case .expired(let hint):
-                next = .expired(hint, cached: recentReading(cached, provider: provider, now: now))
-            case .rateLimited(let until):
-                let retry = Self.clampedRetry(until, now: now)
-                rateLimitedUntil[provider] = retry
-                next = .rateLimited(until: retry, cached: cached)
-            case .unreachable, .parse:
-                if let cached {
-                    next = .stale(cached)
-                } else {
-                    next = .unreachable(cached: nil)
-                }
+            let next = ProviderStatus.failure(error, cached: statuses[provider]?.snapshot, lastChecked: checkedAt[provider], now: now)
+            if case .rateLimited(let until, _) = next {
+                rateLimitedUntil[provider] = until
             }
             if statuses[provider] != next {
                 statuses[provider] = next
@@ -417,16 +345,9 @@ final class QuotaStore {
         }
     }
 
-    private func recentReading(_ cached: QuotaSnapshot?, provider: Provider, now: Date) -> QuotaSnapshot? {
-        guard let cached else { return nil }
-        let checked = checkedAt[provider] ?? cached.fetchedAt
-        return now.timeIntervalSince(checked) < Self.expiredGrace ? cached : nil
-    }
-
     /// Honors Retry-After, within one minute to six hours.
     nonisolated static func clampedRetry(_ until: Date?, now: Date) -> Date {
-        let wait = until.map { $0.timeIntervalSince(now) } ?? TokenroomHTTP.defaultRetryAfter
-        return now.addingTimeInterval(min(max(wait, 60), 6 * 60 * 60))
+        ProviderStatus.clampedRetry(until, now: now)
     }
 
     private static func usageEqual(_ a: QuotaSnapshot, _ b: QuotaSnapshot) -> Bool {
