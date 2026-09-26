@@ -99,7 +99,7 @@ Tokenroom for iPhone shows the same meters, pace, and a week of history. They co
 - the alerts above, as notifications, even when the app isn't running
 - News, with a badge for what's new
 
-The Apple Watch app and its complications read the same iCloud records, so they keep working with the iPhone away. The Smart Stack shows a limit as it nears its reset or passes 80%. To send your Mac's readings, turn on **Settings → iPhone & Watch** in the signed download of Tokenroom for Mac. A copy you build and sign yourself can't use iCloud.
+The Apple Watch app and its complications read the same iCloud records, so they keep working with the iPhone away. The Smart Stack shows a limit as it nears its reset or passes 80%. The signed download of Tokenroom for Mac sends its readings on its own (**Settings → iPhone & Watch** turns that off). A copy you build and sign yourself can't use iCloud.
 
 Tokenroom for iPhone and Apple Watch is on its way to the App Store. It has a sample mode for looking around first.
 

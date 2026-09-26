@@ -6,6 +6,17 @@ import Foundation
 ///
 /// Only Copilot the user pays for personally shows up; seats from an organization don't.
 enum CopilotBilling {
+    /// The ID of the month's bucket, whether read with the Mac's login or a token.
+    static let windowID = "premium_interactions"
+    /// The ID Tokenroom 2.0.0 gave the same bucket when read with a token; Macs not updated yet
+    /// still send it, and history recorded under it moves over (`HistoryStore`).
+    static let legacyWindowID = "ai_credits"
+
+    /// A window's ID the way this version names it.
+    static func currentWindowID(provider: String, window: String) -> String {
+        provider == Provider.copilot.rawValue && window == legacyWindowID ? windowID : window
+    }
+
     struct Plan: Equatable, Sendable {
         var name: String
         /// Monthly allowance, when GitHub publishes one (Free and Student have none on record).
@@ -34,6 +45,9 @@ enum CopilotBilling {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2026-03-10",
     ]
+
+    /// A token GitHub refused. `Provider.copilot.expiredHint` is about the gh login instead.
+    static let tokenExpiredHint = "Couldn't use this fine-grained token. Add a new one in Settings."
 
     /// `login` from `GET /user`, which needs no permissions.
     static func login(from data: Data) throws -> String {
@@ -65,7 +79,9 @@ enum CopilotBilling {
         let month = month(containing: now)
         let unit = plan.isLegacy ? "requests" : "credits"
         let window = QuotaWindow(
-            id: plan.isLegacy ? "premium_interactions" : "ai_credits",
+            // The ID the Mac's login read gives the same bucket, so history and alerts carry on
+            // when the reading switches between the login and the token.
+            id: windowID,
             kind: .monthly,
             title: plan.isLegacy ? "Premium requests" : "AI credits",
             usedPercent: plan.allowance.map { JSONFlex.clampPercent(used / $0 * 100) } ?? 0,

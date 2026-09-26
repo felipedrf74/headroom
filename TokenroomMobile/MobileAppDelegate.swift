@@ -19,13 +19,17 @@ final class MobileAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         return true
     }
 
+    /// A silent push only means a Mac sent readings. iOS allows about 30 seconds; the answer goes
+    /// back within 25 whatever iCloud does, and the refresh is cancelled then (its unfinished
+    /// checks don't count). It says whether anything changed, which iOS weighs when it decides
+    /// on later pushes.
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        // A silent push only means a Mac sent readings; keys on this iPhone can wait.
-        await store.refresh(force: true, includeKeys: false)
-        return .newData
+        let store = self.store
+        let changed = await TimeLimit.run(25, otherwise: false) { await store.refreshForPush() }
+        return changed ? .newData : .noData
     }
 
     /// Alerts show as banners while the app is open too.

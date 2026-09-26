@@ -152,10 +152,14 @@ final class PaceTests: XCTestCase {
         XCTAssertEqual(steady.severity, .none)
 
         XCTAssertNil(Pace.evaluate(used: 70, kind: .weekly, resetsAt: reset, measured: RelayPace(runsOutAt: reset.addingTimeInterval(3600)), now: now)?.runsOutAt, "After the reset isn't a run-out")
-        XCTAssertNil(Pace.evaluate(used: 70, kind: .weekly, resetsAt: reset, measured: RelayPace(runsOutAt: now.addingTimeInterval(-60)), now: now)?.runsOutAt, "A measurement from before now is stale")
+        let passed = try XCTUnwrap(Pace.evaluate(used: 70, kind: .weekly, resetsAt: reset, measured: RelayPace(runsOutAt: now.addingTimeInterval(-60)), now: now))
+        XCTAssertEqual(passed.runsOutAt, now, "A run-out time that has passed means it has run out by now, not that it won't")
+        XCTAssertEqual(passed.severity, .critical)
 
-        let window = RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 70, resetsAt: reset, periodSec: week, pace: RelayPace(runsOutAt: now.addingTimeInterval(10 * 3600)))
+        var window = RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 70, resetsAt: reset, periodSec: week, pace: RelayPace(runsOutAt: now.addingTimeInterval(10 * 3600)))
         XCTAssertEqual(UsageRanking.pace(for: window, isStale: false, history: nil, now: now)?.runsOutAt, now.addingTimeInterval(10 * 3600), "Readers use the relayed pace")
+        window.pace = RelayPace(runsOutAt: now.addingTimeInterval(-600))
+        XCTAssertEqual(UsageRanking.pace(for: window, isStale: false, history: nil, now: now)?.severity, .critical, "Seen after the relayed run-out, it reads as out")
     }
 
     func testNeedsAttention() throws {
@@ -259,6 +263,62 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(history.windowResetsAt, reset.addingTimeInterval(86_400), "No reset time reported changes nothing")
     }
 
+    // MARK: Resets used early
+
+    private let week: TimeInterval = 7 * 86_400
+
+    /// A weekly window at 92%, its reset a day away.
+    private func busyWeek() -> UsageHistory {
+        var history = UsageHistory(endingAt: base)
+        history.record(92, at: base)
+        history.recordResetTime(base.addingTimeInterval(86_400), used: 92, length: week, at: base)
+        return history
+    }
+
+    func testABankedResetUsedEarlyIsNoted() {
+        // Used 20 minutes after the last reading, and seen 10 minutes later, in the same hour.
+        let opened = base.addingTimeInterval(20 * 60)
+        let seen = opened.addingTimeInterval(10 * 60)
+        var sameHour = busyWeek()
+        sameHour.record(0, at: seen)
+        XCTAssertTrue(sameHour.recordResetTime(opened.addingTimeInterval(week), used: 0, length: week, at: seen))
+        XCTAssertEqual(sameHour.resets, [opened], "Marked when the new window opened, a day before the old reset")
+        XCTAssertEqual(sameHour.windowResetsAt, opened.addingTimeInterval(week))
+        XCTAssertFalse(sameHour.recordResetTime(opened.addingTimeInterval(week + 60), used: 1, length: week, at: seen.addingTimeInterval(600)), "Only once")
+        XCTAssertEqual(sameHour.resets, [opened])
+
+        // Seen hours later, with the reset time checked before the reading's use is recorded.
+        let later = base.addingTimeInterval(3 * 3600)
+        var hoursLater = busyWeek()
+        XCTAssertTrue(hoursLater.recordResetTime(opened.addingTimeInterval(week), used: 6, length: week, at: later))
+        hoursLater.record(6, at: later)
+        XCTAssertEqual(hoursLater.resets, [opened])
+    }
+
+    func testOnlyASharpDropInANewWindowIsAnEarlyReset() {
+        let movedOn = base.addingTimeInterval(2 * 86_400)
+        let next = base.addingTimeInterval(10 * 60)
+        var noise = busyWeek()
+        XCTAssertTrue(noise.recordResetTime(movedOn, used: 91, length: week, at: next), "The new reset time is kept")
+        XCTAssertNil(noise.resets, "A point of noise or rounding isn't a reset")
+
+        var slid = busyWeek()
+        slid.recordResetTime(movedOn, used: 80, length: week, at: next)
+        XCTAssertNil(slid.resets, "Nor is falling 12 points, well short of half")
+
+        var replanned = busyWeek()
+        replanned.recordResetTime(next.addingTimeInterval(week), used: 30, length: week, at: next)
+        XCTAssertNil(replanned.resets, "Nor a fall to a third, as when a plan changes mid-week or a reset follows the last use: a window that just started is near nothing")
+
+        var ahead = busyWeek()
+        ahead.recordResetTime(base.addingTimeInterval(86_400 + week), used: 0, length: week, at: next)
+        XCTAssertNil(ahead.resets, "A reset time for the window after this one, which hasn't begun")
+
+        var unknown = busyWeek()
+        unknown.recordResetTime(next.addingTimeInterval(week), used: 0, at: next)
+        XCTAssertNil(unknown.resets, "Without the window's length, only a reset whose time has passed counts")
+    }
+
     /// Weeks saved before amounts and resets were kept still read, and write nothing new.
     func testAnOlderWeekStillDecodes() throws {
         let used = (0..<UsageHistory.capacity).map { $0 == UsageHistory.capacity - 1 ? "40" : "null" }.joined(separator: ",")
@@ -272,6 +332,154 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertTrue(week.amountPoints.isEmpty)
         let written = String(decoding: try RelayEnvelope.encoder.encode(week), as: UTF8.self)
         XCTAssertFalse(written.contains("amounts") || written.contains("resets") || written.contains("windowResetsAt"), "An older reader sees the same keys")
+    }
+}
+
+/// Weeks as the Mac and the iPhone record them from readings.
+final class HistoryStoreTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_790_000_000)
+    private let week: TimeInterval = 7 * 86_400
+
+    private func reading(_ windows: [QuotaWindow], at date: Date) -> QuotaSnapshot {
+        try! QuotaSnapshot.headlined(by: windows, provider: .openai, fetchedAt: date)
+    }
+
+    private func weekly(_ used: Double, resetsAt: Date, id: String = "weekly") -> QuotaWindow {
+        QuotaWindow(id: id, kind: .weekly, title: "Weekly", usedPercent: used, resetsAt: resetsAt, windowSeconds: week)
+    }
+
+    /// Codex's reset credits: one used a day early shows on the week's chart.
+    @MainActor
+    func testABankedResetUsedEarlyIsMarked() {
+        let store = HistoryStore(directory: nil)
+        store.record(reading([weekly(92, resetsAt: now.addingTimeInterval(86_400))], at: now), now: now)
+        let used = now.addingTimeInterval(15 * 60)
+        let seen = now.addingTimeInterval(25 * 60)
+        store.record(reading([weekly(0, resetsAt: used.addingTimeInterval(week))], at: seen), now: seen)
+        XCTAssertEqual(store.weeks(for: .openai)["weekly"]?.resets, [used])
+    }
+
+    @MainActor
+    func testAReadingDatedAheadOfTheClockStaysOut() {
+        let store = HistoryStore(directory: nil)
+        let reset = now.addingTimeInterval(3 * 86_400)
+        store.record(reading([weekly(40, resetsAt: reset)], at: now.addingTimeInterval(365 * 86_400)), now: now)
+        XCTAssertTrue(store.weeks.isEmpty, "Dated a year ahead, it would move the week past every later reading")
+        store.record(reading([weekly(41, resetsAt: reset)], at: now.addingTimeInterval(30 * 60)), now: now)
+        XCTAssertEqual(store.weeks(for: .openai)["weekly"]?.points.map(\.used), [41], "Within the hour is fine")
+    }
+
+    @MainActor
+    func testAWeekAheadOfTheClockStartsOver() throws {
+        // Saved from a reading dated a year ahead, before those were left out.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let yearAhead = now.addingTimeInterval(365 * 86_400)
+        var ahead = UsageHistory(endingAt: yearAhead)
+        ahead.record(40, at: yearAhead)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let key = RelayHistory.key(provider: Provider.openai.rawValue, window: "weekly")
+        try RelayEnvelope.encoder.encode([key: ahead]).write(to: folder.appendingPathComponent(HistoryStore.fileName))
+
+        let store = HistoryStore(directory: folder)
+        store.record(reading([weekly(41, resetsAt: now.addingTimeInterval(3 * 86_400))], at: now), now: now)
+        let recorded = try XCTUnwrap(store.weeks(for: .openai)["weekly"])
+        XCTAssertEqual(recorded.points.map(\.date), [UsageHistory.hourStart(now)], "Readings land again instead of being older than the week")
+        XCTAssertEqual(recorded.points.map(\.used), [41])
+    }
+
+    @MainActor
+    func testWindowsWithoutAReadingForAWeekAreForgotten() {
+        let store = HistoryStore(directory: nil)
+        let reset = now.addingTimeInterval(3 * 86_400)
+        store.record(reading([weekly(40, resetsAt: reset), weekly(30, resetsAt: reset, id: "opus")], at: now), now: now)
+        // The provider stops reporting the second window.
+        let sixDays = now.addingTimeInterval(6 * 86_400)
+        store.record(reading([weekly(50, resetsAt: sixDays.addingTimeInterval(86_400))], at: sixDays), now: sixDays)
+        XCTAssertEqual(Set(store.weeks(for: .openai).keys), ["weekly", "opus"], "Still inside the week")
+        let aWeek = now.addingTimeInterval(week + 3600)
+        store.record(reading([weekly(55, resetsAt: aWeek.addingTimeInterval(86_400))], at: aWeek), now: aWeek)
+        XCTAssertEqual(Set(store.weeks(for: .openai).keys), ["weekly"], "Nothing left of it in the last week")
+        XCTAssertEqual(Set(store.relayHistory(for: [.openai]).series.keys), [RelayHistory.key(provider: Provider.openai.rawValue, window: "weekly")])
+    }
+
+    /// Widgets read keys while the app isn't running; the app records what they read.
+    @MainActor
+    func testReadingsWidgetsTookReachTheWeek() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let key = RelayHistory.key(provider: Provider.openai.rawValue, window: "weekly")
+        HistoryStore.queue([reading([weekly(30, resetsAt: reset)], at: now)], in: folder, now: now)
+        HistoryStore.queue([reading([weekly(35, resetsAt: reset)], at: now.addingTimeInterval(3600))], in: folder, now: now)
+        XCTAssertEqual(HistoryStore.loadWithPending(from: folder, now: now.addingTimeInterval(3600))[key]?.points.map(\.used), [30, 35], "A widget shows them at once")
+        XCTAssertTrue(HistoryStore.load(from: folder).isEmpty, "Only the app writes the week")
+
+        let store = HistoryStore(directory: folder)
+        store.takePending(now: now.addingTimeInterval(2 * 3600))
+        store.saveIfNeeded()
+        XCTAssertEqual(HistoryStore.load(from: folder)[key]?.points.map(\.used), [30, 35])
+        XCTAssertTrue(HistoryStore.pending(in: folder).isEmpty, "Taken once")
+    }
+
+    func testTheWidgetQueueKeepsAnHoursLatestReading() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let readings = (0..<150).map { reading([weekly(Double($0 % 100), resetsAt: reset)], at: now.addingTimeInterval(Double($0) * 60)) }
+        HistoryStore.queue(readings, in: folder, now: now)
+        let hours = Set(readings.map { UsageHistory.hourStart($0.fetchedAt) })
+        XCTAssertEqual(HistoryStore.pending(in: folder).count, hours.count, "One reading a provider an hour")
+        XCTAssertEqual(HistoryStore.pending(in: folder).last?.fetchedAt, readings.last?.fetchedAt)
+        HistoryStore.queue([readings[readings.count - 2]], in: folder, now: now)
+        XCTAssertEqual(HistoryStore.pending(in: folder).last?.fetchedAt, readings.last?.fetchedAt, "An earlier reading doesn't replace a later one")
+
+        let later = now.addingTimeInterval(8 * 86_400)
+        HistoryStore.queue([reading([weekly(5, resetsAt: later.addingTimeInterval(86_400))], at: later)], in: folder, now: later)
+        XCTAssertEqual(HistoryStore.pending(in: folder).map(\.fetchedAt), [later], "What the week no longer holds goes")
+    }
+
+    /// A refresh cut short after moving the queue aside records it the next time.
+    @MainActor
+    func testQueuedReadingsSurviveARefreshCutShort() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let key = RelayHistory.key(provider: Provider.openai.rawValue, window: "weekly")
+        HistoryStore.queue([reading([weekly(30, resetsAt: reset)], at: now)], in: folder, now: now)
+        let queue = folder.appendingPathComponent(HistoryStore.pendingFolderName)
+        let taking = folder.appendingPathComponent(HistoryStore.takingFolderName)
+        try FileManager.default.moveItem(at: queue, to: taking)
+        HistoryStore.queue([reading([weekly(45, resetsAt: reset)], at: now.addingTimeInterval(2 * 3600))], in: folder, now: now)
+        XCTAssertEqual(HistoryStore.pending(in: folder).count, 2, "Both still waiting")
+
+        let store = HistoryStore(directory: folder)
+        store.takePending(now: now.addingTimeInterval(3 * 3600))
+        XCTAssertEqual(HistoryStore.load(from: folder)[key]?.points.map(\.used), [30, 45], "Saved as it's taken")
+        XCTAssertTrue(HistoryStore.pending(in: folder).isEmpty)
+    }
+
+    /// Copilot's month read with a token had its own ID in 2.0.0; its week carries on.
+    @MainActor
+    func testCopilotsOlderHistoryCarriesOn() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var week = UsageHistory(endingAt: now)
+        week.record(40, at: now)
+        let old = RelayHistory.key(provider: Provider.copilot.rawValue, window: CopilotBilling.legacyWindowID)
+        try RelayEnvelope.encoder.encode([old: week]).write(to: folder.appendingPathComponent(HistoryStore.fileName))
+
+        let current = RelayHistory.key(provider: Provider.copilot.rawValue, window: CopilotBilling.windowID)
+        XCTAssertEqual(HistoryStore.load(from: folder), [current: week], "Widgets read it under the new ID")
+        let store = HistoryStore(directory: folder)
+        XCTAssertEqual(store.weeks(for: .copilot)[CopilotBilling.windowID], week)
+        store.saveIfNeeded()
+        let saved = try RelayEnvelope.decoder.decode([String: UsageHistory].self, from: Data(contentsOf: folder.appendingPathComponent(HistoryStore.fileName)))
+        XCTAssertEqual(Array(saved.keys), [current], "Saved under it")
     }
 }
 

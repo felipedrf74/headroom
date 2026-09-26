@@ -38,6 +38,24 @@ final class ForecastTests: XCTestCase {
         XCTAssertNil(Forecast.daysLeft(remaining: 10, history: history([10]), now: now))
     }
 
+    func testASmallRiseIsntATopUp() throws {
+        // A dollar an hour for a day, with a cent refunded four hours ago.
+        var amounts = (0...24).map { 50 - Double($0) }
+        amounts[20] = amounts[19] + 0.01
+        let days = try XCTUnwrap(Forecast.daysLeft(remaining: 26, history: history(amounts), now: now), "The runway isn't hidden for half a day")
+        XCTAssertEqual(days, 26.0 / 24, accuracy: 0.0001)
+
+        // Under a dollar, where a cent is more than 1% of the balance.
+        var low = (0...24).map { 0.98 - Double($0) * 0.03 }
+        low[20] = low[19] + 0.01
+        XCTAssertEqual(try XCTUnwrap(Forecast.daysLeft(remaining: 0.26, history: history(low), now: now)), 0.26 / 0.72, accuracy: 0.0001)
+
+        // A rise over a dollar and over 1% is a top-up.
+        var topped = (0...24).map { 50 - Double($0) }
+        topped[20] = topped[19] + 1.5
+        XCTAssertNil(Forecast.daysLeft(remaining: 26, history: history(topped), now: now), "Four hours since a top-up isn't a rate")
+    }
+
     func testRunwayText() {
         XCTAssertEqual(Forecast.runwayText(daysLeft: 12.4), "≈ 12 days left at this week's rate")
         XCTAssertEqual(Forecast.runwayText(daysLeft: 1.2), "≈ 1 day left at this week's rate")
@@ -55,6 +73,32 @@ final class ForecastTests: XCTestCase {
         let projected = try XCTUnwrap(Forecast.projectedSpend(spent: 100, startsAt: start, resetsAt: end, now: utc(2026, 9, 7)))
         XCTAssertEqual(projected, 500, accuracy: 0.001, "$100 in a fifth of the month")
         XCTAssertNil(Forecast.projectedSpend(spent: 0, startsAt: start, resetsAt: end, now: utc(2026, 9, 7)), "Nothing spent, nothing to project")
+    }
+
+    func testProjectionEndsWithTheMonth() {
+        let start = utc(2026, 9, 1)
+        let end = utc(2026, 10, 1)
+        XCTAssertNil(Forecast.projectedSpend(spent: 500, startsAt: start, resetsAt: end, now: utc(2026, 10, 3)), "Not \"on track for $469\" in the next month")
+        XCTAssertNil(Forecast.projectedSpend(spent: 500, startsAt: start, resetsAt: end, now: end))
+        let spend = RelayWindow(id: "spend-month", kind: "monthly", title: "This month", used: 0, resetsAt: end, startsAt: start, amount: QuotaAmount(used: 500, unit: "usd"), metered: false)
+        XCTAssertNil(Forecast.text(for: spend, history: nil, now: utc(2026, 10, 3)))
+    }
+
+    func testProjectionRunsToTheReadingAndSkipsOldOnes() throws {
+        let start = utc(2026, 9, 1)
+        let end = utc(2026, 10, 1)
+        // $100 read at midnight on 7 September, a fifth of the month in, and seen that evening.
+        let read = utc(2026, 9, 7)
+        let projected = try XCTUnwrap(Forecast.projectedSpend(spent: 100, startsAt: start, resetsAt: end, checkedAt: read, now: utc(2026, 9, 7, 20)))
+        XCTAssertEqual(projected, 500, accuracy: 0.001, "The pace so far runs to the reading, not to the viewer's clock")
+        XCTAssertNil(Forecast.projectedSpend(spent: 100, startsAt: start, resetsAt: end, checkedAt: read, now: utc(2026, 9, 8, 1)), "Over a day old")
+        XCTAssertNil(Forecast.projectedSpend(spent: 480, startsAt: start, resetsAt: end, checkedAt: utc(2026, 9, 30, 20), now: utc(2026, 10, 1, 2)), "Read before the month ended, seen after")
+
+        let spend = RelayWindow(id: "spend-month", kind: "monthly", title: "This month", used: 0, resetsAt: end, startsAt: start, amount: QuotaAmount(used: 100, unit: "usd"), metered: false)
+        XCTAssertEqual(Forecast.text(for: spend, history: nil, checkedAt: read, now: utc(2026, 9, 7, 20)), "On track for \(AmountFormat.text(500, unit: "usd")) this month")
+        XCTAssertNil(Forecast.text(for: spend, history: nil, checkedAt: read, now: utc(2026, 9, 9)))
+        let macSpend = QuotaWindow(id: "spend-month", kind: .monthly, title: "This month", usedPercent: 0, resetsAt: end, startsAt: start, amount: QuotaAmount(used: 100, unit: "usd"), metered: false)
+        XCTAssertEqual(Forecast.text(for: macSpend, history: nil, checkedAt: read, now: utc(2026, 9, 7, 20)), Forecast.text(for: spend, history: nil, checkedAt: read, now: utc(2026, 9, 7, 20)))
     }
 
     func testProjectionText() {

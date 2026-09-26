@@ -29,11 +29,11 @@ struct UsageWidgetView: View {
             case .systemLarge:
                 ListWidget(entry: entry, count: 8, showsHistory: true)
             case .accessoryCircular:
-                CircularWidget(item: first)
+                CircularWidget(item: first, isSample: entry.isSample)
             case .accessoryRectangular:
-                RectangularWidget(items: Array(entry.items.prefix(3)), date: entry.date)
+                RectangularWidget(items: Array(entry.items.prefix(3)), date: entry.date, isSample: entry.isSample)
             case .accessoryInline:
-                InlineWidget(items: Array(entry.items.prefix(3)))
+                InlineWidget(items: Array(entry.items.prefix(3)), isSample: entry.isSample)
                     .widgetURL(DeepLink.provider(first.id).url)
             default:
                 SmallWidget(entry: entry, item: first)
@@ -101,8 +101,8 @@ private struct ListWidget: View {
                     SampleTag()
                 }
                 Spacer(minLength: 0)
-                if let savedAt = entry.savedAt, entry.date.timeIntervalSince(savedAt) > 3600 {
-                    Text("Updated \(RelativeTime.ago(savedAt, now: entry.date))")
+                if let checkedAt = entry.checkedAt, entry.date.timeIntervalSince(checkedAt) > 3600 {
+                    Text("Updated \(RelativeTime.ago(checkedAt, now: entry.date))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -176,17 +176,44 @@ private struct ListRow: View {
 
 private struct CircularWidget: View {
     var item: ReadingCache.Item
+    var isSample: Bool
 
     var body: some View {
         let window = item.provider.primaryWindow
-        Gauge(value: min(max(window?.used ?? 0, 0), 100), in: 0...100) {
-            Text(item.provider.monogram)
-        } currentValueLabel: {
-            Text(window.map { TokenroomFormat.percentText($0.used) } ?? "–")
-                .monospacedDigit()
+        Group {
+            if let window, !window.isMetered, let amount = window.amount {
+                // A balance has nothing to fill: its amount, rather than a ring reading 0.
+                ZStack {
+                    AccessoryWidgetBackground()
+                    VStack(spacing: 0) {
+                        Text(ReadingText.circleAmount(amount))
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .minimumScaleFactor(0.5)
+                        Text(isSample ? "Sample" : item.provider.monogram)
+                            .font(.system(size: 10, weight: .semibold))
+                            .minimumScaleFactor(0.6)
+                    }
+                    .lineLimit(1)
+                    .padding(6)
+                    .widgetAccentable()
+                }
+            } else {
+                Gauge(value: min(max(window?.used ?? 0, 0), 100), in: 0...100) {
+                    Text(item.provider.monogram)
+                } currentValueLabel: {
+                    // Samples say so where the number goes; the ring still shows the level.
+                    if isSample {
+                        Text("Sample")
+                            .font(.system(size: 11, weight: .semibold))
+                    } else {
+                        Text(window.map { TokenroomFormat.percentText($0.used) } ?? "–")
+                            .monospacedDigit()
+                    }
+                }
+                .gaugeStyle(.accessoryCircular)
+                .widgetAccentable()
+            }
         }
-        .gaugeStyle(.accessoryCircular)
-        .widgetAccentable()
         .widgetURL(DeepLink.provider(item.id).url)
     }
 }
@@ -194,12 +221,15 @@ private struct CircularWidget: View {
 private struct RectangularWidget: View {
     var items: [ReadingCache.Item]
     var date: Date
+    var isSample: Bool
 
     var body: some View {
         ViewThatFits(in: .vertical) {
             VStack(alignment: .leading, spacing: 2) {
-                rows
-                if let first = items.first, let resetsAt = first.provider.primaryWindow?.resetsAt, resetsAt > date {
+                rows(items)
+                if isSample {
+                    sampleLine
+                } else if let first = items.first, let resetsAt = first.provider.primaryWindow?.resetsAt, resetsAt > date {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.counterclockwise")
                         Text(first.provider.shortName)
@@ -211,13 +241,23 @@ private struct RectangularWidget: View {
                 }
             }
             VStack(alignment: .leading, spacing: 3) {
-                rows
+                // Samples give up a row rather than their label.
+                rows(isSample ? Array(items.prefix(2)) : items)
+                if isSample {
+                    sampleLine
+                }
             }
         }
         .widgetURL(items.first.map { DeepLink.provider($0.id).url })
     }
 
-    private var rows: some View {
+    private var sampleLine: some View {
+        Text("Sample data")
+            .font(.caption2)
+            .lineLimit(1)
+    }
+
+    private func rows(_ items: [ReadingCache.Item]) -> some View {
         ForEach(items) { item in
             let used = item.provider.primaryWindow?.used ?? 0
             HStack(spacing: 6) {
@@ -240,6 +280,7 @@ private struct RectangularWidget: View {
 
 private struct InlineWidget: View {
     var items: [ReadingCache.Item]
+    var isSample: Bool
 
     var body: some View {
         ViewThatFits {
@@ -250,7 +291,8 @@ private struct InlineWidget: View {
     }
 
     private func line(_ items: [ReadingCache.Item]) -> String {
-        items.map { "\($0.provider.shortName) \(ReadingText.headline($0.provider.primaryWindow))" }.joined(separator: " · ")
+        let readings = items.map { "\($0.provider.shortName) \(ReadingText.headline($0.provider.primaryWindow))" }
+        return ((isSample ? ["Sample"] : []) + readings).joined(separator: " · ")
     }
 }
 

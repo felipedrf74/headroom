@@ -20,6 +20,8 @@ extension APIKeyClient {
     private static func copilotGet(_ url: URL, key: String) async throws -> Data {
         let (data, response) = try await TokenroomHTTP.data(for: TokenroomHTTP.request(url, token: key, headers: CopilotBilling.headers))
         switch response.statusCode {
+        case 401:
+            throw ProviderError.expired(CopilotBilling.tokenExpiredHint)
         case 403:
             throw ProviderError.notEntitled("This token can't read Copilot usage. Create a fine-grained token with the Plan (read) account permission.")
         case 404:

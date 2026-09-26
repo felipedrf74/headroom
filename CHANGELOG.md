@@ -1,6 +1,49 @@
 # Changelog
 
-## 2.0.0 — Unreleased
+## 2.0.1 — Unreleased
+
+Fixes from an independent review of 2.0, for Tokenroom for Mac and the next iPhone and Apple Watch update.
+
+### Mac
+- Signing in again, or adding or replacing a key, checks that provider at once instead of after its usual spacing (5 minutes for Claude, 15 for Anthropic's cost report), and lifts a "too many requests" wait the old login earned.
+- Refreshes asked for while a check is running share one more check instead of overlapping, a slow iCloud no longer holds up the next check, a check cut short by sleep isn't counted as a failure, and waking always checks again. A check made while the Mac was still offline after waking doesn't delay the next one, and setting the clock back no longer stops automatic checks.
+- Claude: a "too many requests" answer no longer hides newer status-line readings. Opus, Sonnet, and the other windows only Claude's own call reports stop showing 30 minutes after it, and never past their reset.
+- Claude's status line on its own shows the session again when Claude Code reports no weekly window, and the card says a reading came from the status line without dating it by the wrong source.
+- The status-line bridge keeps no copies of `~/.claude/settings.json`, and deletes the ones 2.0.0 kept when Tokenroom starts. It keeps a UTF-8 BOM and CRLF line endings, and refuses a file it can't change in place (a second `statusLine`, UTF-16, a trailing comma, a file or folder it can't write) rather than rewriting it. A settings file that links elsewhere, such as dotfiles other Macs share, is left alone: Settings says what to change, and says so when 2.0.0 replaced such a link with a file.
+- Cursor and Grok Bot use the token in Cursor's database when the Keychain's has expired or is refused, and after a refusal go to it first until Cursor signs in again. That database is copied only when it can't be read in place.
+- Copilot's key sheet fits the window, and replacing a token keeps the plan chosen with it. Copilot keeps one history and one set of alerts whether it's read with the login or a token (the week recorded from a token in 2.0.0 carries on), and isn't labelled unofficial when read with a token.
+- ⌘, no longer opens a second Settings window. The Headroom notice offers Launch at Login. One-line rows say why a reading is old, and the week's line is described for VoiceOver.
+- An xAI team with only prepaid credits isn't shown as spending them.
+- A key saved by a Tokenroom built from source is no longer lost when the signed app moves it into its own keychain.
+
+### iPhone and Apple Watch
+- Opening Tokenroom without iCloud (offline, or a CloudKit error) keeps your Mac's readings in the app, the widgets, and on the Watch; signing out of iCloud clears them.
+- Opening the app reads your keys again even right after a background update, and a refresh asked for during another runs after it instead of being dropped. An iCloud call that never answers no longer stalls refreshing, and a silent push answers iOS within 25 seconds.
+- The Live Activity ends at its reset and shows as reset once it passes, and following again doesn't start a second one, even while an ended one still shows. A reset time the provider moves keeps it going. Its 80% and 95% alerts follow your alert choices and quiet hours.
+- A new budget or reference, or a newly saved key, shows at once, also on a reading saved before the app's next check, and the budget field names the balance's currency.
+- A saved reading no longer shows faded when a widget read it again after the app's check failed.
+- Widgets keep to hard time limits and to WidgetKit's daily budget, share one refresh when several are due, keep other devices' readings when iCloud is slow, and date "Updated … ago" from the readings themselves. Widgets and complications show a balance's amount instead of an empty gauge, sample data is labelled everywhere, and the Watch's rectangular and inline complications open the list. The Watch reloads complications only for changes that matter and doesn't go back to older readings.
+- Readings your widgets take count toward the week's history, one an hour for each provider, and none is lost when the app records them.
+- Follow on Next up follows the window it shows, a Follow that fails says why, and "Connect your Mac › Done" closes the welcome screen.
+
+### Alerts
+- Alerts no longer replace each other when several arrive before you look.
+- A balance that runs low across midnight (UTC) alerts once. The low-balance switch works on its own, and a balance with a reference set only on the iPhone alerts from the iPhone.
+- Alert choices changed on the Mac and the iPhone no longer undo each other, even two quick changes on the iPhone or different alert levels changed on each, and one changed on a Mac while iCloud was away goes out later. Quiet hours follow the iPhone's time zone when it changes. A Mac on 2.0.0 and an iPhone reading Copilot with a token no longer both alert.
+- A held alert says how long is left when it goes out, doesn't follow the 95% one, and respects choices changed since. A provider moving its reset time doesn't repeat alerts, and "Fresh headroom" isn't sent for a reset days ago.
+- Your Mac deletes old alert records from iCloud too, and "Delete Tokenroom Data from iCloud" says when it couldn't.
+
+### Pace, history, and forecasts
+- A change in a balance or spend reaches the iPhone and Watch without waiting for the half-hourly update, and the Mac's run-out includes its newest reading and goes out once it moves an hour.
+- A banked reset used early is marked on the week's chart (and a plan change mid-week isn't), a month's projection stops at the month's end, a small refund isn't a top-up, and a limit reached without a reset time ranks first.
+
+### News
+- Posts from different products with the same title stay separate. A feed past its size limit stops downloading there and says it couldn't be read, and a failed check waits an hour. New feeds and labs start on, turning News on doesn't mark everything new, and links open web pages only.
+
+### Privacy
+- PRIVACY.md says which providers are read through documented APIs, how the Watch gets its readings, when a file is copied, and everything the iPhone keeps. The release's checksum file names the zip without a local path.
+
+## 2.0.0 — 2026-09-25
 
 Headroom is now **Tokenroom**, on the Mac and, new, on iPhone and Apple Watch. On first launch Tokenroom brings over Headroom’s settings and last readings, and offers to quit Headroom.
 

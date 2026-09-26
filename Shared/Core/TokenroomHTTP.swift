@@ -130,6 +130,8 @@ protocol ProviderClient: Sendable {
     func fetch() async -> Result<QuotaSnapshot, ProviderError>
     /// A cheap local reading while the provider's own endpoint is resting between checks, or nil.
     func fetchBetweenCalls(previous: QuotaSnapshot?) async -> QuotaSnapshot?
+    /// A sign-in finished or a key changed: forget anything kept from the old credentials.
+    func credentialsChanged()
 }
 
 extension ProviderClient {
@@ -137,22 +139,78 @@ extension ProviderClient {
 
     /// This check, given up on after its `fetchBudget` (or `budget`, when less time is left), so
     /// one slow provider never holds up the rest. The Mac's refresh, the iPhone's key providers,
-    /// and widgets all read through it.
+    /// and widgets all read through it. A check cut short, by the time or by the caller, is
+    /// unreachable.
     func fetchWithinBudget(_ budget: TimeInterval? = nil) async -> Result<QuotaSnapshot, ProviderError> {
         let limit = min(budget ?? fetchBudget, fetchBudget)
-        return await withTaskGroup(of: Result<QuotaSnapshot, ProviderError>?.self) { group in
-            group.addTask { await self.fetch() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(max(0, limit) * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first ?? .failure(.unreachable)
-        }
+        return await TimeLimit.run(limit, otherwise: .failure(.unreachable)) { await self.fetch() }
     }
 
     func fetchBetweenCalls(previous: QuotaSnapshot?) async -> QuotaSnapshot? {
         nil
+    }
+
+    func credentialsChanged() {}
+}
+
+/// Work that has to give way at a set time: a provider check, or a widget's few seconds.
+enum TimeLimit {
+    /// `work`'s answer, or `fallback` once `seconds` pass or the caller is cancelled. `work` is
+    /// then cancelled but not waited for: a task group would wait, and some calls (iCloud's
+    /// account status) carry on regardless.
+    static func run<T: Sendable>(_ seconds: TimeInterval, otherwise fallback: T, _ work: @escaping @Sendable () async -> T) async -> T {
+        let answer = FirstAnswer<T>()
+        let worker = Task { answer.give(await work()) }
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            answer.give(fallback)
+        }
+        let result = await withTaskCancellationHandler {
+            await answer.wait()
+        } onCancel: {
+            answer.give(fallback)
+        }
+        worker.cancel()
+        timer.cancel()
+        return result
+    }
+}
+
+/// The first answer given, for the one caller waiting on it; later ones are dropped.
+private final class FirstAnswer<T: Sendable>: Sendable {
+    private struct State {
+        var answer: T?
+        var waiting: CheckedContinuation<T, Never>?
+        var isGiven = false
+    }
+
+    private let state = Mutex(State())
+
+    func give(_ answer: T) {
+        let waiting: CheckedContinuation<T, Never>? = state.withLock { state in
+            guard !state.isGiven else { return nil }
+            state.isGiven = true
+            guard let waiting = state.waiting else {
+                // Given before anyone waits (a caller cancelled on arrival): kept for `wait`.
+                state.answer = answer
+                return nil
+            }
+            state.waiting = nil
+            return waiting
+        }
+        waiting?.resume(returning: answer)
+    }
+
+    func wait() async -> T {
+        await withCheckedContinuation { continuation in
+            let ready: T? = state.withLock { state in
+                if let answer = state.answer { return answer }
+                state.waiting = continuation
+                return nil
+            }
+            if let ready {
+                continuation.resume(returning: ready)
+            }
+        }
     }
 }

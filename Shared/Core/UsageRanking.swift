@@ -25,7 +25,11 @@ enum UsageRanking {
 
     static func urgency(_ pace: Pace?) -> Int {
         guard let pace else { return 0 }
-        switch pace.severity {
+        return urgency(severity: pace.severity)
+    }
+
+    private static func urgency(severity: Pace.Severity) -> Int {
+        switch severity {
         case .critical: return 3
         case .tight: return 2
         case .watch: return 1
@@ -33,12 +37,20 @@ enum UsageRanking {
         }
     }
 
+    /// A live limit reached with no reset time (a spent key limit or balance reference) has no
+    /// pace to say so, but is as pressing as one that has.
+    private static func isReachedWithoutReset(_ provider: RelayProvider) -> Bool {
+        guard provider.isLive, let window = provider.primaryWindow else { return false }
+        return window.isMetered && window.resetsAt == nil && window.used >= 100
+    }
+
     /// Most urgent first; ties by name.
     static func sorted<Item>(_ items: [Item], provider: (Item) -> RelayProvider, pace: (Item) -> Pace?) -> [Item] {
         let keyed = items.map { item in
             let reading = provider(item)
             let window = reading.primaryWindow
-            return (item: item, metered: window?.isMetered ?? false, urgency: urgency(pace(item)), used: window?.used ?? 0, name: reading.name)
+            let level = isReachedWithoutReset(reading) ? urgency(severity: .critical) : urgency(pace(item))
+            return (item: item, metered: window?.isMetered ?? false, urgency: level, used: window?.used ?? 0, name: reading.name)
         }
         return keyed.sorted { lhs, rhs in
             if lhs.metered != rhs.metered { return lhs.metered }

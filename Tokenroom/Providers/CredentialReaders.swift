@@ -346,29 +346,81 @@ enum CredentialReaders {
         return String(data: output.stdout, encoding: .utf8)
     }
 
+    /// A token Cursor already refused isn't a session to finish signing in with.
     static func hasUsableCursorSession() -> Bool {
-        (try? cursorAccessToken()) != nil
+        guard let token = try? cursorAccessToken() else { return false }
+        return refusedCursorToken.withLock { $0 != fingerprint(token) }
     }
 
     /// Cursor's token: the Keychain first (Cursor 3.9 and later keep it there), then the older
-    /// `state.vscdb`, which may still hold a token from before the move that no longer works.
+    /// `state.vscdb`, which may still hold a token from before the move that no longer works. A
+    /// Keychain token past its expiry gives way to a current one in the database, which an older
+    /// Cursor still keeps up to date, and so does one Cursor refused before its expiry (revoked),
+    /// until the Keychain holds another.
     static func cursorAccessToken(
         keychain: (String) -> String? = { keychainPassword(service: $0, promptAllowed: false) },
         database: URL = cursorDatabaseURL,
-        usesCache: Bool = true
+        usesCache: Bool = true,
+        now: Date = .now
     ) throws -> String {
         if usesCache, let cached = cursorCache.withLock({ $0 }), Date().timeIntervalSince(cached.readAt) < 20 {
             return cached.token
         }
-        if let token = keychain(cursorKeychainService), !token.isEmpty {
-            if usesCache { cursorCache.withLock { $0 = (token, Date()) } }
-            return token
+        let stored = keychain(cursorKeychainService).flatMap { $0.isEmpty ? nil : $0 }
+        lastKeychainCursorToken.withLock { $0 = stored.map(fingerprint) }
+        let refused = stored.map { stored in refusedCursorToken.withLock { $0 == fingerprint(stored) } } ?? false
+        var token = stored
+        if refused || stored.map({ tokenHasExpired($0, now: now) }) ?? true,
+           let saved = LocalSources.vscodeState("cursorAuth/accessToken", database: database),
+           stored == nil || !tokenHasExpired(saved, now: now) {
+            token = saved
         }
-        if let token = LocalSources.vscodeState("cursorAuth/accessToken", database: database) {
-            if usesCache { cursorCache.withLock { $0 = (token, Date()) } }
-            return token
+        guard let token else { throw ProviderError.signedOut(Provider.cursor.signInHint) }
+        if usesCache { cursorCache.withLock { $0 = (token, Date()) } }
+        return token
+    }
+
+    /// After Cursor refused `refused`: the token in `state.vscdb` when it's a different one, which
+    /// an older Cursor may keep working after the Keychain's was revoked. It's then the one
+    /// reused for the usual 20 seconds, so Grok Bot's check right after doesn't try the refused
+    /// one first.
+    static func cursorTokenAfterRefusal(of refused: String, database: URL = cursorDatabaseURL, now: Date = .now) -> String? {
+        // Only the Keychain's is remembered: it's the one that would otherwise go first again.
+        if lastKeychainCursorToken.withLock({ $0 == fingerprint(refused) }) {
+            refusedCursorToken.withLock { $0 = fingerprint(refused) }
         }
-        throw ProviderError.signedOut(Provider.cursor.signInHint)
+        guard let saved = LocalSources.vscodeState("cursorAuth/accessToken", database: database),
+              saved != refused, !tokenHasExpired(saved, now: now)
+        else { return nil }
+        cursorCache.withLock { $0 = (saved, Date()) }
+        return saved
+    }
+
+    /// The Keychain token Cursor last refused, as a fingerprint kept in memory only, so a revoked
+    /// token doesn't cost a failing call before the database's on every check. Forgotten when
+    /// the Keychain holds another token, or Tokenroom restarts.
+    private static let refusedCursorToken = OSAllocatedUnfairLock<Int?>(initialState: nil)
+    /// The Keychain token last read, likewise as a fingerprint.
+    private static let lastKeychainCursorToken = OSAllocatedUnfairLock<Int?>(initialState: nil)
+
+    private static func fingerprint(_ token: String) -> Int {
+        var hasher = Hasher()
+        hasher.combine(token)
+        return hasher.finalize()
+    }
+
+    /// Whether a JWT's `exp` has passed. Nothing else in it is used; a token that isn't a JWT,
+    /// or has no expiry, counts as current and is left to the server to judge.
+    static func tokenHasExpired(_ token: String, now: Date = .now) -> Bool {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return false }
+        var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONFlex.object(from: data),
+              let expiry = JSONFlex.number(claims["exp"])
+        else { return false }
+        return Date(timeIntervalSince1970: expiry) <= now
     }
 
     static let cursorKeychainService = "cursor-access-token"

@@ -176,6 +176,10 @@ struct PopoverView: View {
                 .font(.system(size: TokenroomTokens.captionSize))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // Headroom's own login item can't be read or carried over; this takes its place.
+            Toggle("Launch Tokenroom at login", isOn: $store.settings.launchAtLogin)
+                .toggleStyle(.checkbox)
+                .font(.system(size: TokenroomTokens.captionSize))
             HStack(spacing: 12) {
                 if LegacyMigration.isLegacyAppRunning {
                     Button("Quit Headroom") {

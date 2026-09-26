@@ -20,8 +20,12 @@ struct ModelRelease: Codable, Equatable, Sendable, Identifiable {
 
 enum ModelFeed {
     /// Newest first, 50 at a time. No key and no Anthropic-style headers: an
-    /// `anthropic-version` header changes the response shape.
+    /// `anthropic-version` header changes the response shape. About 75 KB, read with the usual
+    /// `FeedParser.sizeLimit`.
     static let url = URL(string: "https://openrouter.ai/api/v1/models?sort=newest&limit=50")!
+
+    /// The model list's entry in `NewsCache.unreadable`.
+    static let id = "openrouter-models"
 
     /// Labs followed by default: the ones behind Tokenroom's providers.
     static let defaultVendors: Set<String> = ["anthropic", "openai", "x-ai", "google", "z-ai", "moonshotai", "minimax", "deepseek"]
@@ -84,6 +88,8 @@ struct ModelFeedState: Codable, Equatable, Sendable {
     /// New releases from followed labs since the last check, newest first. The first check
     /// only remembers what's there, so installing Tokenroom doesn't announce the whole catalog.
     mutating func takeNew(from releases: [ModelRelease], following vendors: Set<String>) -> [ModelRelease] {
+        // An empty answer says nothing about the catalog, so it doesn't count as the first check.
+        guard !releases.isEmpty else { return [] }
         let seen = Set(seenIDs)
         defer {
             seenIDs = Array((releases.map(\.id) + seenIDs).uniqued().prefix(Self.memory))
@@ -114,8 +120,9 @@ struct FeedItem: Codable, Equatable, Sendable, Identifiable {
             : title
     }
 
-    /// The same post or release in two feeds: the same title, or the same version under the same
-    /// name ("Claude Code 2.1.282" from the changelog, "Claude Code v2.1.282" from GitHub).
+    /// The same post or release in two of a product's feeds: the same title, or the same version
+    /// under the same name ("Claude Code 2.1.282" from the changelog, "Claude Code v2.1.282" from
+    /// GitHub). `NewsCache.announcements` compares it within a product only.
     var duplicateKey: String {
         displayTitle.lowercased().replacingOccurrences(of: #"\sv(?=\d)"#, with: " ", options: .regularExpression)
     }
@@ -132,7 +139,7 @@ struct FeedSource: Sendable, Identifiable, Equatable {
     var skipsPrereleases = false
     /// Keeps only entries whose link contains this, e.g. a blog's announcements.
     var linkContains: String? = nil
-    /// Largest response read, in bytes. A few feeds embed whole release notes.
+    /// The most read from the feed, in bytes: a longer one stops there, and shows what it got.
     var sizeLimit = FeedParser.sizeLimit
     /// The feed it belongs to: a second source for the same product, shown under that feed's
     /// name and turned on and off with it.
@@ -161,8 +168,11 @@ struct FeedSource: Sendable, Identifiable, Equatable {
         FeedSource(id: "zai", name: "Z.ai", url: URL(string: "https://docs.z.ai/release-notes/new-released/rss.xml")!, provider: .zai),
         FeedSource(id: "kimi-code", name: "Kimi Code", url: URL(string: "https://github.com/MoonshotAI/kimi-code/releases.atom")!, provider: .kimiCode, skipsPrereleases: true),
         FeedSource(id: "openrouter", name: "OpenRouter", url: URL(string: "https://openrouter.ai/blog/feed.xml")!, provider: .openrouter, linkContains: "/blog/announcements/"),
-        // ChatGPT and Codex product notes. Its CLI entries repeat `codex-releases`, so only the
-        // `#codex-…` notes are kept. The feed embeds long release notes: allow 4 MB.
+        // ChatGPT and Codex product notes: each links to a `#codex-…` anchor, ChatGPT's included.
+        // Its `#github-release-…` entries are CLI releases, which `codex-releases` already has.
+        // Those embed each release's full notes (up to 360 KB apiece), so the feed's size follows
+        // them: 1.2 MB in September 2026, 850 KB of it the last 13 releases. 4 MB, twice the
+        // usual limit, leaves room for a run of long ones.
         FeedSource(id: "codex-changelog", name: "ChatGPT & Codex", url: URL(string: "https://learn.chatgpt.com/docs/changelog/rss.xml")!, provider: .openai, linkContains: "#codex-", sizeLimit: 4 * 1024 * 1024),
         FeedSource(id: "antigravity-blog", name: "Antigravity", url: URL(string: "https://antigravity.google/blog/rss.xml")!, provider: .antigravity),
         FeedSource(id: "antigravity-cli", name: "Antigravity CLI", url: URL(string: "https://github.com/google-antigravity/antigravity-cli/releases.atom")!, provider: .antigravity, skipsPrereleases: true),
@@ -173,23 +183,42 @@ struct FeedSource: Sendable, Identifiable, Equatable {
 /// Reads RSS 2.0 and Atom leniently: titles as plain text, the first 30 items.
 enum FeedParser {
     static let itemLimit = 30
+    /// The most read from a feed that doesn't set its own. In September 2026 the feeds ran from
+    /// 5 KB (Devin) to 750 KB (OpenAI News, which keeps every post): 2 MB leaves room to grow, and
+    /// bounds what a broken server can make a phone download.
     static let sizeLimit = 2 * 1024 * 1024
 
     static func items(from data: Data, source: FeedSource) -> [FeedItem] {
-        guard data.count <= source.sizeLimit else { return [] }
+        read(data, source: source).items
+    }
+
+    /// The feed's items, and whether the whole document parsed. One cut short at the size limit,
+    /// or broken, still gives the items that ended before the break.
+    static func read(_ data: Data, source: FeedSource) -> (items: [FeedItem], isComplete: Bool) {
         let delegate = FeedXMLDelegate(source: source)
-        let parser = XMLParser(data: data)
+        let parser = XMLParser(data: data.prefix(source.sizeLimit))
         parser.delegate = delegate
         parser.shouldResolveExternalEntities = false
-        parser.parse()
+        let parsed = parser.parse()
         // Some feeds repeat a title for every small update ("ChatGPT for iOS"); keep the first.
         var titles = Set<String>()
-        return delegate.items
+        let items = delegate.items
             .filter { !source.skipsPrereleases || !isPrerelease($0.title) }
             .filter { item in source.linkContains.map { item.link?.absoluteString.contains($0) == true } ?? true }
             .filter { titles.insert($0.title.lowercased()).inserted }
             .prefix(itemLimit)
-            .map { $0 }
+        return (Array(items), parsed && data.count <= source.sizeLimit)
+    }
+
+    /// An entry's link if it's a web page, resolved against the feed. Other schemes
+    /// (`javascript:`, `file:`, an app's own) are dropped, so an item only ever opens the browser.
+    static func webLink(_ text: String, feed: URL) -> URL? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              let url = URL(string: text, relativeTo: feed)?.absoluteURL,
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
     }
 
     /// Release titles like `@scope/package@2.1.1` read as the version alone.
@@ -201,9 +230,13 @@ enum FeedParser {
         title.range(of: #"(?i)(-|\s)(alpha|beta|rc)(\b|\.|\d)"#, options: .regularExpression) != nil
     }
 
-    /// Strips tags, decodes entities left over from HTML titles, and collapses whitespace.
+    /// HTML elements a title may carry. Other text in angle brackets is kept: "<thinking> blocks",
+    /// a `</s>` token, `Either<A, B>`.
+    private static let htmlTag = #"</?(?:a|abbr|b|big|br|cite|code|del|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|small|span|strong|sub|sup|time|tt|u|ul|wbr)(?:\s[^<>]*)?/?>"#
+
+    /// Strips HTML tags, decodes entities left over from HTML titles, and collapses whitespace.
     static func plainText(_ html: String) -> String {
-        var text = html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        var text = html.replacingOccurrences(of: htmlTag, with: " ", options: .regularExpression)
         for (entity, character) in ["&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&nbsp;": " "] {
             text = text.replacingOccurrences(of: entity, with: character)
         }
@@ -314,7 +347,7 @@ private final class FeedXMLDelegate: NSObject, XMLParserDelegate {
         depth = nil
         let cleanTitle = FeedParser.cleanTitle(FeedParser.plainText(title))
         guard !cleanTitle.isEmpty else { return }
-        let url = link.flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let url = link.flatMap { FeedParser.webLink($0, feed: source.url) }
         let id = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         items.append(FeedItem(
             id: id.isEmpty ? (url?.absoluteString ?? cleanTitle) : id,

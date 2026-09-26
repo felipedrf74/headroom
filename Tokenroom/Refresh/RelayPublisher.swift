@@ -23,6 +23,8 @@ final class RelayPublisher {
         static let enabled = "relayEnabled"
         static let sourceID = "relaySourceID"
         static let label = "relayLabel"
+        static let preferencesBase = "alertPreferencesBase"
+        static let prunedAt = "eventsPrunedAt"
     }
 
     static let minimumInterval = RelayPublishPolicy.minimumInterval
@@ -37,9 +39,15 @@ final class RelayPublisher {
             defaults.set(isEnabled, forKey: Keys.enabled)
             if !isEnabled {
                 state = relay == nil ? .unavailable : .off
-            } else if relay != nil, state == .off {
+            } else if let relay, state == .off {
                 state = .waiting
                 policy.reset()
+                retryAt = nil
+                lastHistoryHour = nil
+                // Turning sync back on is how someone who deleted Tokenroom's iCloud data in
+                // Settings starts again: the zone is created anew (the choices go back when
+                // iCloud turns out to have none).
+                Task { await relay.resetZone() }
             }
         }
     }
@@ -55,7 +63,8 @@ final class RelayPublisher {
     private let relay: CloudRelay?
     private let defaults: UserDefaults
     private var policy = RelayPublishPolicy()
-    private var preferencesCache: (preferences: AlertPreferences, readAt: Date)?
+    /// The shared alert choices as iCloud last had them (nil: none yet).
+    private var preferencesCache: (preferences: AlertPreferences?, readAt: Date)?
     private var retryAt: Date?
     private var lastHistoryHour: Date?
     private var loggedAccount = false
@@ -84,7 +93,7 @@ final class RelayPublisher {
     /// changed (after a minute), or every 30 minutes as a heartbeat.
     func publish(_ envelope: RelayEnvelope, force: Bool = false, now: Date = .now) async {
         guard let relay, isEnabled else { return }
-        if let retryAt, retryAt > now, !force { return }
+        if isWaiting(now), !force { return }
         guard policy.isDue(envelope, force: force, now: now) else { return }
 
         do {
@@ -95,7 +104,8 @@ final class RelayPublisher {
             logger.notice("relay sent \(envelope.providers.count, privacy: .public) providers")
             if !loggedAccount, let fingerprint = try? await relay.accountFingerprint() {
                 loggedAccount = true
-                logger.notice("relay account \(fingerprint, privacy: .public)")
+                // Private: even hashed, it's the same value on every device of the account.
+                logger.notice("relay account \(fingerprint, privacy: .private)")
             }
             policy.didSend(envelope, at: now)
             retryAt = nil
@@ -108,7 +118,7 @@ final class RelayPublisher {
     /// Sends the week of hourly history once per hour.
     func publishHistory(_ history: RelayHistory, now: Date = .now) async {
         guard let relay, isEnabled, !history.series.isEmpty else { return }
-        if let retryAt, retryAt > now { return }
+        if isWaiting(now) { return }
         let hour = UsageHistory.hourStart(now)
         guard lastHistoryHour != hour else { return }
         do {
@@ -119,37 +129,64 @@ final class RelayPublisher {
         }
     }
 
-    /// The newer of this Mac's alert preferences and the copy in iCloud, which either device may
-    /// have changed. iCloud is checked at most every half hour.
-    func alertPreferences(local: AlertPreferences, now: Date = .now) async -> AlertPreferences {
-        if let cached = preferencesCache, now.timeIntervalSince(cached.readAt) < 30 * 60 {
-            return AlertPreferences.newest(cached.preferences, local)
-        }
-        guard let relay, isEnabled, let remote = try? await relay.alertPreferences() else {
-            return AlertPreferences.newest(preferencesCache?.preferences, local)
-        }
-        preferencesCache = (remote, now)
-        return AlertPreferences.newest(remote, local)
+    /// The alert choices this Mac last knew to match iCloud. What differs from them in Settings
+    /// is a change made here that iCloud doesn't have yet (made offline, say): it goes out on the
+    /// next refresh, laid over whatever the iPhone changed meanwhile.
+    private var preferencesBase: AlertPreferences? {
+        get { defaults.data(forKey: Keys.preferencesBase).flatMap { try? RelayEnvelope.decoder.decode(AlertPreferences.self, from: $0) } }
+        set { defaults.set(newValue.flatMap { try? RelayEnvelope.encoder.encode($0) }, forKey: Keys.preferencesBase) }
     }
 
-    /// Shares preferences changed on this Mac.
-    func publishAlertPreferences(_ preferences: AlertPreferences, now: Date = .now) async {
-        preferencesCache = (preferences, now)
-        guard let relay, isEnabled else { return }
+    /// The alert choices to use now, in step with iCloud: a change made on the iPhone is taken,
+    /// and one made here goes out on top of the newest shared copy, so neither undoes the
+    /// other. While nothing changed here, iCloud is read at most every half hour.
+    func syncAlertPreferences(local: AlertPreferences, now: Date = .now) async -> AlertPreferences {
+        guard let relay, isEnabled else { return local }
+        if isWaiting(now) { return local }
+        let base = preferencesBase
+        let remote: AlertPreferences?
+        if local.sameChoices(as: base), let cached = preferencesCache, (0..<(30 * 60)).contains(now.timeIntervalSince(cached.readAt)) {
+            remote = cached.preferences
+        } else {
+            do {
+                remote = try await relay.alertPreferences()
+                preferencesCache = (remote, now)
+            } catch {
+                // Kept as they are here; a change made here goes out on a later refresh.
+                handle(error, now: now)
+                return local
+            }
+        }
+        let resolution = AlertPreferencesSync.resolve(base: base, local: local, remote: remote)
+        guard resolution.needsPublish else {
+            // In step: iCloud's copy, or with none there, choices nobody changed.
+            preferencesBase = remote ?? resolution.preferences
+            return resolution.preferences
+        }
         do {
-            try await relay.publishAlertPreferences(preferences)
+            try await relay.publishAlertPreferences(resolution.preferences)
+            preferencesBase = resolution.preferences
+            preferencesCache = (resolution.preferences, now)
         } catch {
             handle(error, now: now)
         }
+        return resolution.preferences
     }
 
-    /// Sends alerts to the iPhone; returns the IDs iCloud saved. The rest stay queued.
+    /// Sends alerts to the iPhone; returns the IDs that went out (or already had). The rest stay
+    /// queued.
     func sendAlerts(_ alerts: [UsageAlert], now: Date = .now) async -> [String] {
         guard let relay, isEnabled else { return [] }
-        if let retryAt, retryAt > now { return [] }
+        if isWaiting(now) { return [] }
         var saved: [String] = []
         for alert in alerts {
             do {
+                // A balance crossing another device announced on the other side of midnight
+                // (UTC) has that day's name; don't announce it again under this one's.
+                if try await relay.wentOutOnANeighbouringDay(alert, now: now) {
+                    saved.append(alert.id)
+                    continue
+                }
                 try await relay.saveAlert(alert)
                 saved.append(alert.id)
                 logger.notice("relay alert sent \(alert.kind.rawValue, privacy: .public) \(alert.level, privacy: .public)")
@@ -158,6 +195,20 @@ final class RelayPublisher {
             }
         }
         return saved
+    }
+
+    /// Once a day, deletes alert records older than two weeks, so they don't pile up in iCloud
+    /// on a Mac used without the iPhone app.
+    func pruneEventsIfDue(now: Date = .now) async {
+        guard let relay, isEnabled else { return }
+        if isWaiting(now) { return }
+        if let pruned = defaults.object(forKey: Keys.prunedAt) as? Date, (0..<86_400).contains(now.timeIntervalSince(pruned)) { return }
+        do {
+            try await relay.pruneEvents(now: now)
+            defaults.set(now, forKey: Keys.prunedAt)
+        } catch {
+            logger.error("relay pruning failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Creates an alert event the iPhone shows as a notification. Used by "Send Test Alert".
@@ -175,6 +226,13 @@ final class RelayPublisher {
         } catch {
             handle(error, now: now)
         }
+    }
+
+    /// Whether iCloud asked to wait. A wait further off than an hour means the clock was set back
+    /// since it was saved.
+    private func isWaiting(_ now: Date) -> Bool {
+        guard let retryAt, retryAt > now else { return false }
+        return retryAt.timeIntervalSince(now) <= 3600
     }
 
     @discardableResult

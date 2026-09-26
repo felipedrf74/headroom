@@ -37,6 +37,19 @@ enum ReadingText {
     }
 
     /// Used % for metered windows, the amount for balances without a limit.
+    /// A balance or spend short enough for a circular widget or complication: "$12", "$1.2K".
+    static func circleAmount(_ amount: QuotaAmount) -> String {
+        guard let value = amount.remainingOrComputed ?? amount.used else { return "—" }
+        switch amount.unit {
+        case "usd":
+            return value.formatted(.currency(code: "USD").notation(.compactName))
+        case "cny":
+            return value.formatted(.currency(code: "CNY").notation(.compactName))
+        default:
+            return value.formatted(.number.notation(.compactName))
+        }
+    }
+
     static func headline(_ window: RelayWindow?) -> String {
         guard let window else { return "—" }
         if !window.isMetered, let amount = window.amount {

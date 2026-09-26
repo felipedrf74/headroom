@@ -10,20 +10,39 @@ final class NewsStore {
     enum Keys {
         static let vendors = "newsVendors"
         static let sources = "newsSources"
+        /// The catalog when `sources` was saved, so feeds added since start on.
+        static let knownSources = "newsKnownSources"
+        /// The default labs when `vendors` was saved, so labs added to the defaults since start on.
+        static let knownVendors = "newsKnownVendors"
         static let seenAt = "newsSeenAt"
     }
+
+    /// Tokenroom 2.0's feeds: what a list saved before `Keys.knownSources` existed had offered.
+    static let firstCatalog: Set<String> = [
+        "claude-code", "claude-code-releases", "openai-news", "codex-releases", "gemini", "copilot", "cursor", "devin",
+        "zai", "kimi-code", "openrouter", "codex-changelog", "antigravity-blog", "antigravity-cli", "minimax-code",
+    ]
+
+    /// Tokenroom 2.0's default labs: what a list saved before `Keys.knownVendors` existed had.
+    static let firstDefaultVendors: Set<String> = ["anthropic", "openai", "x-ai", "google", "z-ai", "moonshotai", "minimax", "deepseek"]
 
     private(set) var cache: NewsCache
     private(set) var isRefreshing = false
 
     /// Labs whose new models are announced, e.g. `anthropic`.
     var followedVendors: Set<String> {
-        didSet { defaults.set(followedVendors.sorted(), forKey: Keys.vendors) }
+        didSet {
+            defaults.set(followedVendors.sorted(), forKey: Keys.vendors)
+            defaults.set(ModelFeed.defaultVendors.sorted(), forKey: Keys.knownVendors)
+        }
     }
 
     /// Feed IDs from `FeedSource.catalog`.
     var followedSources: Set<String> {
-        didSet { defaults.set(followedSources.sorted(), forKey: Keys.sources) }
+        didSet {
+            defaults.set(followedSources.sorted(), forKey: Keys.sources)
+            defaults.set(FeedSource.catalog.map(\.id).sorted(), forKey: Keys.knownSources)
+        }
     }
 
     /// When News was last opened. Items published after it count as new.
@@ -45,8 +64,14 @@ final class NewsStore {
         self.defaults = defaults
         self.directory = directory
         cache = NewsCache.load(from: directory)
-        followedVendors = (defaults.array(forKey: Keys.vendors) as? [String]).map(Set.init) ?? ModelFeed.defaultVendors
-        followedSources = (defaults.array(forKey: Keys.sources) as? [String]).map(Set.init) ?? Set(FeedSource.catalog.map(\.id))
+        // A saved choice, plus labs added to the defaults since it was saved, as with feeds below.
+        let knownVendors = (defaults.array(forKey: Keys.knownVendors) as? [String]).map(Set.init) ?? Self.firstDefaultVendors
+        followedVendors = (defaults.array(forKey: Keys.vendors) as? [String]).map { Set($0).union(ModelFeed.defaultVendors.subtracting(knownVendors)) } ?? ModelFeed.defaultVendors
+        // A saved choice, plus feeds added to the catalog since it was saved: those start on,
+        // as every feed does before anything is saved.
+        let catalog = Set(FeedSource.catalog.map(\.id))
+        let known = (defaults.array(forKey: Keys.knownSources) as? [String]).map(Set.init) ?? Self.firstCatalog
+        followedSources = (defaults.array(forKey: Keys.sources) as? [String]).map { Set($0).union(catalog.subtracting(known)) } ?? catalog
         // A first launch starts from now, so the whole list isn't "new".
         let saved = defaults.object(forKey: Keys.seenAt) as? Double
         let seen = saved.map(Date.init(timeIntervalSince1970:)) ?? now
@@ -89,6 +114,21 @@ final class NewsStore {
         unseenModelCount + unseenAnnouncementCount
     }
 
+    /// "Couldn't read …" when the model list's last answer couldn't be read.
+    var modelProblem: String? {
+        cache.unreadable?.contains(ModelFeed.id) == true ? "Couldn't read OpenRouter's model list." : nil
+    }
+
+    /// "Couldn't read …" naming the followed feeds whose last answer couldn't be read in full.
+    var announcementProblem: String? {
+        let names = sources.filter { cache.unreadable?.contains($0.id) == true }.map(\.name)
+        guard let last = names.last else { return nil }
+        if names.count > 1, names.count == sources.count {
+            return "Couldn't read the feeds."
+        }
+        return "Couldn't read \(names.count == 1 ? last : names.dropLast().joined(separator: ", ") + " and " + last)."
+    }
+
     /// Whether to mark an item as new while News is open.
     func isNew(_ date: Date?) -> Bool {
         guard let date else { return false }
@@ -119,6 +159,11 @@ final class NewsStore {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        if cache.modelsFetchedAt == nil, cache.announcementsFetchedAt == nil {
+            // The first check (on the Mac, when News is turned on): what it finds isn't new.
+            seenAt = max(seenAt, now)
+            visitBaseline = seenAt
+        }
         let result = await NewsFetcher.refresh(cache, sources: sources, following: followedVendors, maxAge: maxAge, now: now)
         cache = result.cache
         cache.save(to: directory)

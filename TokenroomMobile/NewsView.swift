@@ -55,7 +55,7 @@ struct NewsView: View {
                     if news.isRefreshing {
                         ProgressView()
                     } else {
-                        ContentUnavailableView("Nothing yet", systemImage: "newspaper", description: Text("Pull down to check for news."))
+                        ContentUnavailableView("Nothing yet", systemImage: "newspaper", description: Text(problem ?? "Pull down to check for news."))
                     }
                 }
             }
@@ -66,6 +66,13 @@ struct NewsView: View {
         switch section {
         case .models: news.models(all: showsAllLabs).isEmpty
         case .announcements: news.announcements.isEmpty
+        }
+    }
+
+    private var problem: String? {
+        switch section {
+        case .models: news.modelProblem
+        case .announcements: news.announcementProblem
         }
     }
 
@@ -86,7 +93,7 @@ struct NewsView: View {
                         .textCase(nil)
                 }
             } footer: {
-                Text("From OpenRouter's public model list.")
+                NewsFooter(text: "From OpenRouter's public model list.", problem: news.modelProblem)
             }
         }
         let retiring = news.retiring
@@ -108,7 +115,7 @@ struct NewsView: View {
                     AnnouncementRow(item: item, isNew: news.isNew(item.published))
                 }
             } footer: {
-                Text("From each provider's official changelog or blog.")
+                NewsFooter(text: "From each provider's official changelog or blog.", problem: news.announcementProblem)
             }
         }
     }

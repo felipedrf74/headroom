@@ -31,7 +31,7 @@ struct OnboardingView: View {
                         .font(.title3.weight(.semibold))
 
                     NavigationLink {
-                        ConnectMacView(store: store)
+                        ConnectMacView(store: store) { dismiss() }
                     } label: {
                         OptionCard(symbol: "laptopcomputer.and.iphone", title: "Connect your Mac", text: "Claude, Codex, Cursor, Copilot, and more, from Tokenroom on your Mac through your iCloud.")
                     }
@@ -115,14 +115,15 @@ private struct OptionCard: View {
 
 private struct ConnectMacView: View {
     var store: MobileStore
-    @Environment(\.dismiss) private var dismiss
+    /// Closes the whole welcome sheet, not just this step.
+    var close: () -> Void
 
     var body: some View {
         List {
             Section {
                 Step(number: 1, text: "Install Tokenroom on your Mac.")
                 Link("Get Tokenroom for Mac", destination: TokenroomIdentity.repositoryURL.appendingPathComponent("releases"))
-                Step(number: 2, text: "In Tokenroom's Settings on your Mac, turn on iPhone & Apple Watch.")
+                Step(number: 2, text: "Open it. It sends its readings to your iCloud on its own (Settings › iPhone & Watch).")
                 Step(number: 3, text: "Use the same Apple Account on your Mac and this iPhone.")
             } footer: {
                 Text("Your Mac sends only usage, reset times, and plan names. Logins and keys never leave it.")
@@ -135,7 +136,7 @@ private struct ConnectMacView: View {
                 Button("Done") {
                     store.hasOnboarded = true
                     Task { await store.refresh(force: true) }
-                    dismiss()
+                    close()
                 }
             }
         }

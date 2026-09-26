@@ -4,12 +4,14 @@ import SwiftUI
 /// the Lock Screen and in the Dynamic Island. Hidden when nothing resets within 8 hours.
 struct FollowButton: View {
     var provider: RelayProvider
+    /// The window the screen shows, followed when it resets within 8 hours.
+    var preferring: String? = nil
     /// Reports why following failed, for a caption next to the button.
     var onError: (String?) -> Void = { _ in }
     @State private var isFollowing = false
 
     var body: some View {
-        if let window = LiveActivities.candidate(in: provider) {
+        if let window = LiveActivities.candidate(in: provider, preferring: preferring) {
             Button {
                 toggle(window)
             } label: {
@@ -34,11 +36,13 @@ struct FollowButton: View {
             onError("Live Activities are off for Tokenroom. Turn them on in Settings › Tokenroom.")
             return
         }
-        do {
-            isFollowing = try LiveActivities.start(provider, window: window)
-            onError(nil)
-        } catch {
-            onError("Couldn't start the Live Activity.")
+        Task {
+            do {
+                isFollowing = try await LiveActivities.start(provider, window: window)
+                onError(nil)
+            } catch {
+                onError("Couldn't start the Live Activity.")
+            }
         }
     }
 }

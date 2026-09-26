@@ -8,7 +8,7 @@ final class APIKeyTests: XCTestCase {
 
     override func tearDown() {
         for store in stores {
-            for provider in Provider.allCases where provider.usesAPIKey {
+            for provider in Provider.allCases where provider.readsWithKey {
                 try? store.remove(for: provider)
             }
         }
@@ -25,9 +25,12 @@ final class APIKeyTests: XCTestCase {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let name = "tokenroom.tests.\(UUID().uuidString)"
+        // Named by the class and a count: macOS keeps an empty preferences file for every name.
+        let name = "tokenroom.tests.\(Self.self).\(suites.count)"
         suites.append(name)
-        return UserDefaults(suiteName: name)!
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
     }
 
     private func makeFolder() -> URL {
@@ -123,6 +126,24 @@ final class APIKeyTests: XCTestCase {
         let older = try JSONDecoder().decode(APIKeyStore.Metadata.self, from: Data(#"{"last4":"a1b2","addedAt":812030400,"region":"China"}"#.utf8))
         XCTAssertNil(older.warning, "Keys saved before warnings existed still read")
         XCTAssertEqual(older.region, "China")
+    }
+
+    /// Replace starts the key form on the plan or region saved with the key, so a Copilot token
+    /// saved with Max doesn't quietly go back to Pro.
+    func testReplacingAKeyStartsFromTheChoiceSavedWithIt() throws {
+        let copilot = try XCTUnwrap(Provider.copilot.keySpec)
+        XCTAssertEqual(copilot.initialChoice(saved: nil), "Pro", "A new token starts on the first plan")
+
+        let store = APIKeyStore(servicePrefix: "app.tokenroom.tests.\(UUID().uuidString).")
+        stores.append(store)
+        try store.save("test-token-value-g7h8", for: .copilot, region: "Max")
+        XCTAssertEqual(copilot.initialChoice(saved: store.metadata(for: .copilot)), "Max")
+
+        let retired = APIKeyStore.Metadata(last4: "g7h8", addedAt: .now, region: "A plan GitHub dropped")
+        XCTAssertEqual(copilot.initialChoice(saved: retired), "Pro", "A choice this version doesn't offer falls back to the first")
+        let china = APIKeyStore.Metadata(last4: "c3d4", addedAt: .now, region: "China")
+        XCTAssertEqual(try XCTUnwrap(Provider.moonshot.keySpec).initialChoice(saved: china), "China")
+        XCTAssertEqual(try XCTUnwrap(Provider.openrouter.keySpec).initialChoice(saved: nil), "", "Nothing to choose")
     }
 
     func testMissingKeyReadsAsSignedOut() async {

@@ -57,7 +57,7 @@ struct ProviderCard: View {
                 } else {
                     header(percent: nil, remaining: 100, stale: false)
                 }
-                caption("Couldn't refresh. \(provider.displayName) asked to wait until \(until.formatted(date: .omitted, time: .shortened)).")
+                caption(Self.rateLimitedText(provider, until: until))
             case .unreachable(let cached):
                 if let cached {
                     snapshotBlock(cached, stale: true)
@@ -90,6 +90,7 @@ struct ProviderCard: View {
         let stale = status.isStale
         let metered = snapshot.windows.first?.isMetered ?? true
         let value = headlineValue(snapshot) ?? "—"
+        let note = Self.compactNote(status, provider: provider, checkedAt: checkedAt)
         return Button {
             onToggleExpanded?()
         } label: {
@@ -117,6 +118,12 @@ struct ProviderCard: View {
                         .foregroundStyle(paceColor(pace))
                         .help(pace.caption())
                 }
+                if let note {
+                    Image(systemName: note.symbol)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .help(note.text)
+                }
                 Text(value)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(TokenroomTokens.ink(remaining: metered ? snapshot.remainingPercent : 100, isStale: stale))
@@ -133,8 +140,29 @@ struct ProviderCard: View {
                 .fill(Color.primary.opacity(0.045))
         )
         .help("Show details")
-        .accessibilityLabel("\(provider.displayName), \(value)\(pace.map { ", \($0.caption())" } ?? "")")
+        .accessibilityLabel("\(provider.displayName), \(value)\(note.map { ", \($0.text)" } ?? "")\(pace.map { ", \($0.caption())" } ?? "")")
         .accessibilityHint("Shows every window and the last 7 days")
+    }
+
+    /// What a one-line row says about a reading that isn't current, besides graying it: a symbol
+    /// with this text as its tooltip, and the text for VoiceOver.
+    static func compactNote(_ status: ProviderStatus, provider: Provider, checkedAt: Date?, now: Date = .now) -> (symbol: String, text: String)? {
+        switch status {
+        case .rateLimited(let until, .some):
+            return ("hourglass", rateLimitedText(provider, until: until))
+        case .stale(let snapshot), .unreachable(let snapshot?), .expired(_, let snapshot?):
+            return ("clock.arrow.circlepath", lastGoodText(checkedAt ?? snapshot.fetchedAt, now: now))
+        default:
+            return nil
+        }
+    }
+
+    static func rateLimitedText(_ provider: Provider, until: Date) -> String {
+        "Couldn't refresh. \(provider.displayName) asked to wait until \(until.formatted(date: .omitted, time: .shortened))."
+    }
+
+    static func lastGoodText(_ checkedAt: Date?, now: Date = .now) -> String {
+        "Last good reading, \(RelativeTime.ago(checkedAt, now: now))."
     }
 
     @ViewBuilder
@@ -195,7 +223,7 @@ struct ProviderCard: View {
                 header(value: headlineValue(snapshot), remaining: 100, stale: stale)
             }
             caption(primary.title)
-            if !stale, let forecast = Forecast.text(for: primary, history: weeks[primary.id]) {
+            if !stale, let forecast = Forecast.text(for: primary, history: weeks[primary.id], checkedAt: checkedAt ?? snapshot.fetchedAt) {
                 caption(forecast)
             }
         } else {
@@ -211,7 +239,7 @@ struct ProviderCard: View {
                 }
             }
             caption(primaryCaption(snapshot))
-            if !stale, let primary = snapshot.windows.first, let forecast = Forecast.text(for: primary, history: weeks[primary.id]) {
+            if !stale, let primary = snapshot.windows.first, let forecast = Forecast.text(for: primary, history: weeks[primary.id], checkedAt: checkedAt ?? snapshot.fetchedAt) {
                 caption(forecast)
             }
         }
@@ -235,17 +263,24 @@ struct ProviderCard: View {
                 caption(text)
             }
         }
-        if snapshot.source == "bridge" {
-            caption("via Claude Code · \(RelativeTime.ago(snapshot.fetchedAt))")
-        } else if let source = LocalKeys.caption(forSource: snapshot.source) {
+        if let source = Self.sourceCaption(snapshot) {
             caption(source)
         }
         if !isExpanded, let plan = snapshot.planLabel, plan != snapshot.primaryTitle {
             caption(plan)
         }
         if stale {
-            caption("Last good reading, \(RelativeTime.ago(checkedAt ?? snapshot.fetchedAt)).")
+            caption(Self.lastGoodText(checkedAt ?? snapshot.fetchedAt))
         }
+    }
+
+    /// Where a reading came from when it isn't the provider's own usage call. No time: a status
+    /// line reading the direct call repeats is confirmed by that call, and "Checked …" says when.
+    static func sourceCaption(_ snapshot: QuotaSnapshot) -> String? {
+        if snapshot.source == "bridge" {
+            return "via Claude Code's status line"
+        }
+        return LocalKeys.caption(forSource: snapshot.source)
     }
 
     /// Every window, the week behind the primary one, banked resets, and where the reading came from.
@@ -262,8 +297,11 @@ struct ProviderCard: View {
                         .foregroundStyle(.secondary)
                     Sparkline(history: week, tint: Color(hex: provider.tintHex))
                         .frame(height: 36)
-                        .accessibilityLabel("Usage over the last 7 days")
                 }
+                // The line itself is hidden from VoiceOver; the group says what it shows.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Usage over the last 7 days")
+                .accessibilityValue(Self.weekSummary(week))
             }
             ForEach(extraWindows(snapshot)) { window in
                 WindowRow(
@@ -300,11 +338,22 @@ struct ProviderCard: View {
             if let checked = checkedAt {
                 caption("Checked \(RelativeTime.ago(checked))")
             }
-            if provider.isUnofficial {
+            if Self.readsUnofficially(provider, snapshot: snapshot) {
                 caption("Unofficial: read from the same endpoint \(provider.toolName) uses. It can change without notice.")
             }
         }
         .padding(.top, 2)
+    }
+
+    /// Read from the endpoint the provider's own app uses. Copilot read with a pasted token goes
+    /// through GitHub's documented billing API instead.
+    static func readsUnofficially(_ provider: Provider, snapshot: QuotaSnapshot) -> Bool {
+        provider.isUnofficial && snapshot.source != "copilot-token"
+    }
+
+    /// What the week's line shows, for VoiceOver: its highest hour and the latest.
+    static func weekSummary(_ week: UsageHistory) -> String {
+        Sparkline.summary(week)
     }
 
     /// The header and meter toggle the details when the popover allows it.

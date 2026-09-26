@@ -55,6 +55,33 @@ final class JSONTextEditTests: XCTestCase {
         XCTAssertNotNil(try JSONSerialization.jsonObject(with: Data(removed.utf8)))
     }
 
+    func testAddedLinesEndLikeTheTextsOwn() throws {
+        let crlf = "{\r\n  \"model\": \"opus\"\r\n}\r\n"
+        let added = try XCTUnwrap(JSONTextEdit.setting("statusLine", to: statusLine, in: crlf))
+        XCTAssertEqual(added, "{\r\n  \"model\": \"opus\",\r\n  \"statusLine\": \(statusLineText)\r\n}\r\n")
+        XCTAssertEqual(JSONTextEdit.removing("statusLine", in: added), crlf, "Removing it gives the text back exactly")
+        XCTAssertEqual(JSONTextEdit.setting("statusLine", to: statusLine, in: "{\r\n}"), "{\r\n  \"statusLine\": \(statusLineText)\r\n}")
+        XCTAssertEqual(JSONTextEdit.removing("statusLine", in: "{\r\n  \"statusLine\": {}\r\n}"), "{\r\n}", "Only")
+    }
+
+    func testAKeySetTwiceIsRefused() {
+        // Foundation reads the first of duplicate keys and Node (Claude Code) the last.
+        let text = #"{"statusLine": {"command": "a"}, "model": "opus", "statusLine": {"command": "b"}}"#
+        XCTAssertEqual(JSONTextEdit.count(of: "statusLine", in: text), 2)
+        XCTAssertEqual(JSONTextEdit.count(of: "model", in: text), 1)
+        XCTAssertEqual(JSONTextEdit.count(of: "env", in: text), 0)
+        XCTAssertNil(JSONTextEdit.count(of: "statusLine", in: "[1, 2]"))
+        XCTAssertNil(JSONTextEdit.setting("statusLine", to: statusLine, in: text))
+        XCTAssertNil(JSONTextEdit.removing("statusLine", in: text))
+
+        let otherTwice = #"{"env": {}, "env": {"A": "1"}, "statusLine": "x"}"#
+        XCTAssertEqual(
+            JSONTextEdit.setting("statusLine", to: statusLine, in: otherTwice),
+            #"{"env": {}, "env": {"A": "1"}, "statusLine": \#(statusLineText)}"#,
+            "Another key set twice doesn't stop the edit"
+        )
+    }
+
     func testRefusesWhatIsntOneJSONObject() {
         for text in ["[1, 2]", #""statusLine""#, "", "   ", #"{"a": 1} trailing"#, #"{"a": 1}{"b": 2}"#, #"{"a": 1,}"#, #"{"a" 1}"#, #"{"a": "unterminated}"#, #"{"a": {"b": 1}"#] {
             XCTAssertNil(JSONTextEdit.setting("statusLine", to: statusLine, in: text), text)

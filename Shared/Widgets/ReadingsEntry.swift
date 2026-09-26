@@ -6,7 +6,9 @@ struct ReadingsEntry: TimelineEntry {
     /// The chosen provider first, then most urgent first.
     var items: [ReadingCache.Item]
     var isSample: Bool
-    var savedAt: Date?
+    /// When the freshest reading was last confirmed; the cache itself is saved on every rebuild,
+    /// however old the readings in it.
+    var checkedAt: Date?
     var isPlaceholder = false
 
     /// The readings as they stand at `date`, the chosen provider first.
@@ -15,7 +17,7 @@ struct ReadingsEntry: TimelineEntry {
         if let id = choice.providerID, let index = items.firstIndex(where: { $0.id == id }) {
             items.insert(items.remove(at: index), at: 0)
         }
-        return ReadingsEntry(date: date, items: items, isSample: cache?.isSample ?? false, savedAt: cache?.savedAt)
+        return ReadingsEntry(date: date, items: items, isSample: cache?.isSample ?? false, checkedAt: cache?.checkedAt)
     }
 }
 

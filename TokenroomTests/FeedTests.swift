@@ -46,6 +46,13 @@ final class FeedTests: XCTestCase {
         XCTAssertEqual(state.takeNew(from: second, following: ModelFeed.defaultVendors), [], "Each release is announced once")
     }
 
+    func testAnEmptyFirstAnswerDoesntEndTheQuietSeed() throws {
+        var state = ModelFeedState()
+        XCTAssertEqual(state.takeNew(from: [], following: ModelFeed.defaultVendors), [])
+        XCTAssertNil(state.newestSeen, "An empty answer isn't a first check")
+        XCTAssertEqual(state.takeNew(from: try ModelFeed.releases(from: models), following: ModelFeed.defaultVendors), [], "The first real answer still only remembers what's there")
+    }
+
     // MARK: Announcements
 
     private let claudeCode = FeedSource(id: "claude-code", name: "Claude Code", url: URL(string: "https://example.com/rss.xml")!)
@@ -118,6 +125,30 @@ final class FeedTests: XCTestCase {
         XCTAssertEqual(FeedParser.items(from: rss, source: source).map(\.title), ["Batch API"])
     }
 
+    func testTitlesKeepAngleBracketsThatArentHTML() {
+        XCTAssertEqual(FeedParser.plainText("Support for <thinking> blocks"), "Support for <thinking> blocks")
+        XCTAssertEqual(FeedParser.plainText("Fix </s> handling in Either<A, B>"), "Fix </s> handling in Either<A, B>")
+        XCTAssertEqual(FeedParser.plainText("Use <code>--resume</code> to <b>pick up</b><br/>a session"), "Use --resume to pick up a session")
+        XCTAssertEqual(FeedParser.plainText(#"<a href="https://example.com">Read</a> <img src="card.png"> more"#), "Read more")
+        let rss = Data("<rss version=\"2.0\"><channel><item><title>Support for &lt;thinking&gt; blocks</title><link>https://example.com/thinking</link></item></channel></rss>".utf8)
+        XCTAssertEqual(FeedParser.items(from: rss, source: claudeCode).map(\.title), ["Support for <thinking> blocks"], "Escaped in the feed, still text")
+    }
+
+    func testLinksAreWebPagesOnly() {
+        let rss = Data("""
+        <rss version="2.0"><channel>
+          <item><title>Script</title><link>javascript:alert(1)</link></item>
+          <item><title>File</title><link>file:///tmp/feed</link></item>
+          <item><title>App</title><link>shortcuts://run-shortcut?name=x</link></item>
+          <item><title>Relative</title><link>/blog/relative</link></item>
+          <item><title>Web</title><link>https://example.com/web</link></item>
+        </channel></rss>
+        """.utf8)
+        let items = FeedParser.items(from: rss, source: claudeCode)
+        XCTAssertEqual(items.map { $0.link?.absoluteString }, [nil, nil, nil, "https://example.com/blog/relative", "https://example.com/web"], "Web pages only; a relative link is on the feed's site")
+        XCTAssertEqual(items.first?.id, "Script", "No guid and no usable link: the title identifies it")
+    }
+
     func testLimitsItemsAndSize() {
         let items = (0..<40).map { "<item><title>Post \($0)</title><link>https://example.com/\($0)</link></item>" }.joined()
         let rss = Data("<rss version=\"2.0\"><channel>\(items)</channel></rss>".utf8)
@@ -166,6 +197,95 @@ final class FeedTests: XCTestCase {
         let request = StubURLProtocol.requests.first { $0.url == ModelFeed.url }
         XCTAssertNotNil(request, "The models list was asked for")
         XCTAssertNil(request?.value(forHTTPHeaderField: "anthropic-version"), "That header changes OpenRouter's answer")
+    }
+
+    /// Answers every request with `handler`, through `StubETagProtocol`. Pair with `unstubNetwork`.
+    private func stubNetwork(_ handler: @escaping @Sendable (URLRequest) -> (Int, Data)) {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubETagProtocol.self]
+        TokenroomHTTP.overrideSession(URLSession(configuration: configuration))
+    }
+
+    private func unstubNetwork() {
+        TokenroomHTTP.overrideSession(nil)
+        StubURLProtocol.reset()
+    }
+
+    private static let noModels = Data(#"{"data":[]}"#.utf8)
+
+    func testTheSizeLimitStopsTheDownload() async {
+        defer { unstubNetwork() }
+        stubNetwork { _ in (200, Data(repeating: UInt8(ascii: "x"), count: 3000)) }
+        let url = URL(string: "https://example.com/big.xml")!
+        guard case let .body(data, _, isTruncated) = await NewsFetcher.get(url, validator: nil, sizeLimit: 1024) else {
+            return XCTFail("A 200 has a body")
+        }
+        XCTAssertEqual(data.count, 1024, "Reading stops at the limit")
+        XCTAssertTrue(isTruncated)
+        guard case let .body(whole, _, cut) = await NewsFetcher.get(url, validator: nil, sizeLimit: 3000) else {
+            return XCTFail("A 200 has a body")
+        }
+        XCTAssertEqual(whole.count, 3000)
+        XCTAssertFalse(cut, "A body exactly at the limit is whole")
+    }
+
+    func testAFeedPastItsLimitShowsWhatArrivedAndSaysSo() async {
+        defer { unstubNetwork() }
+        let long = Data("""
+        <rss version="2.0"><channel>
+          <item><title>Short post</title><link>https://example.com/short</link><pubDate>Thu, 24 Sep 2026 12:00:00 GMT</pubDate></item>
+          <item><title>Long post</title><link>https://example.com/long</link><pubDate>Wed, 23 Sep 2026 12:00:00 GMT</pubDate><description>\(String(repeating: "Notes. ", count: 400))</description></item>
+        </channel></rss>
+        """.utf8)
+        stubNetwork { request in request.url == ModelFeed.url ? (200, Self.noModels) : (200, long) }
+        let source = FeedSource(id: "long", name: "Long", url: URL(string: "https://example.com/long.xml")!, sizeLimit: 1024)
+        let now = utc(2026, 9, 25, 12)
+        let first = await NewsFetcher.refresh(NewsCache(), sources: [source], following: [], now: now)
+        XCTAssertEqual(first.cache.items["long"]?.map(\.title), ["Short post"], "What arrived before the limit")
+        XCTAssertNil(first.cache.validators[source.url.absoluteString], "Not taken for the whole feed: no 304 keeps it")
+        XCTAssertEqual(first.cache.unreadable, ["long"])
+        XCTAssertEqual(first.cache.announcementsFetchedAt, now, "It answered: it waits for the next check like the others")
+
+        let short = Data("<rss version=\"2.0\"><channel><item><title>Short post</title><link>https://example.com/short</link></item></channel></rss>".utf8)
+        StubURLProtocol.handler = { request in request.url == ModelFeed.url ? (200, Self.noModels) : (200, short) }
+        let second = await NewsFetcher.refresh(first.cache, sources: [source], following: [], maxAge: 0, now: now.addingTimeInterval(60))
+        XCTAssertNil(second.cache.unreadable, "Read in full again")
+        XCTAssertEqual(second.cache.validators[source.url.absoluteString]?.etag, "\"v1\"")
+    }
+
+    func testABrokenFeedKeepsWhatItHad() async {
+        defer { unstubNetwork() }
+        let page = Data("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body>Down for maintenance</body></html>".utf8)
+        stubNetwork { request in request.url == ModelFeed.url ? (200, Self.noModels) : (200, page) }
+        var cache = NewsCache()
+        cache.items["claude-code"] = [FeedItem(id: "old", title: "2.1.282", link: URL(string: "https://example.com/2-1-282"), published: utc(2026, 9, 24), source: "Claude Code")]
+        cache.validators[claudeCode.url.absoluteString] = NewsCache.Validator(etag: "\"v0\"")
+        let result = await NewsFetcher.refresh(cache, sources: [claudeCode], following: [], now: utc(2026, 9, 25, 12))
+        XCTAssertEqual(result.cache.items["claude-code"]?.map(\.id), ["old"], "A page that isn't the feed leaves the last items")
+        XCTAssertNil(result.cache.validators[claudeCode.url.absoluteString])
+        XCTAssertEqual(result.cache.unreadable, ["claude-code"])
+    }
+
+    func testFailedChecksWaitBeforeAskingAgain() async {
+        defer { unstubNetwork() }
+        stubNetwork { _ in (503, Data()) }
+        let now = utc(2026, 9, 25, 12)
+        var cache = await NewsFetcher.refresh(NewsCache(), sources: [claudeCode], following: [], now: now).cache
+        XCTAssertEqual(StubURLProtocol.requests.count, 2, "The model list and the feed")
+        XCTAssertEqual(cache.modelsFailedAt, now)
+        XCTAssertEqual(cache.announcementsFailedAt, now)
+        XCTAssertEqual(cache.unreadable, [ModelFeed.id, "claude-code"])
+
+        cache = await NewsFetcher.refresh(cache, sources: [claudeCode], following: [], now: now.addingTimeInterval(600)).cache
+        XCTAssertEqual(StubURLProtocol.requests.count, 2, "The next refresh doesn't ask again")
+
+        cache = await NewsFetcher.refresh(cache, sources: [claudeCode], following: [], maxAge: 0, now: now.addingTimeInterval(660)).cache
+        XCTAssertEqual(StubURLProtocol.requests.count, 4, "Asking now (pulling to refresh, Check now) still goes out")
+
+        _ = await NewsFetcher.refresh(cache, sources: [claudeCode], following: [], now: now.addingTimeInterval(660 + NewsFetcher.retryInterval))
+        XCTAssertEqual(StubURLProtocol.requests.count, 6, "An hour after the last try, it tries again")
     }
 
     func testCatalogIsHTTPSAndUnique() {
@@ -226,6 +346,19 @@ final class FeedTests: XCTestCase {
         XCTAssertEqual(cache.announcements(from: [sources[1]]).map(\.id), ["n1", "n2"], "Alone, a feed keeps its copy")
     }
 
+    func testTitlesOnlyFoldWithinAProduct() {
+        var cache = NewsCache()
+        cache.items = [
+            "zai": [FeedItem(id: "z1", title: "Release notes", link: URL(string: "https://example.com/zai/notes"), published: utc(2026, 9, 24), source: "Z.ai")],
+            "devin": [FeedItem(id: "d1", title: "Release notes", link: URL(string: "https://example.com/devin/notes"), published: utc(2026, 9, 20), source: "Devin")],
+            "cursor": [FeedItem(id: "c1", title: "Faster agents", link: URL(string: "https://example.com/launch"), published: utc(2026, 9, 23), source: "Cursor")],
+            "copilot": [FeedItem(id: "g1", title: "Agents everywhere", link: URL(string: "https://example.com/launch"), published: utc(2026, 9, 22), source: "GitHub Copilot")],
+        ]
+        let shown = cache.announcements(from: FeedSource.catalog)
+        XCTAssertEqual(shown.map(\.id), ["z1", "c1", "d1"], "Two labs' \"Release notes\" are two posts; two products linking to one page are one")
+        XCTAssertEqual(shown.last?.published, utc(2026, 9, 20), "Each dated by its own feed")
+    }
+
     func testTheSameVersionFromTwoFeedsShowsOnce() throws {
         let releases = try XCTUnwrap(FeedSource.catalog.first { $0.id == "claude-code-releases" })
         XCTAssertEqual(releases.partOf, "claude-code")
@@ -273,16 +406,24 @@ final class FeedTests: XCTestCase {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let name = "tokenroom.tests.\(UUID().uuidString)"
+        // Named by the class and a count: macOS keeps an empty preferences file for every name.
+        let name = "tokenroom.tests.\(Self.self).\(suites.count)"
         suites.append(name)
-        return UserDefaults(suiteName: name)!
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    private func makeFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        folders.append(folder)
+        return folder
     }
 
     /// A News folder holding two followed releases, one unfollowed, and two Claude Code notes.
     private func makeNewsFolder() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        folders.append(folder)
+        let folder = try makeFolder()
         func release(_ id: String, _ vendor: String, _ created: Date) -> ModelRelease {
             ModelRelease(id: id, name: id, vendor: vendor, created: created, contextLength: nil, promptPrice: nil, completionPrice: nil, expires: nil)
         }
@@ -329,6 +470,140 @@ final class FeedTests: XCTestCase {
         XCTAssertEqual(defaults.double(forKey: NewsStore.Keys.seenAt), utc(2026, 9, 25, 12).timeIntervalSince1970, "Remembered, so the next launch counts from here")
         news.markSeen(now: utc(2026, 9, 25, 11))
         XCTAssertEqual(defaults.double(forKey: NewsStore.Keys.seenAt), utc(2026, 9, 25, 12).timeIntervalSince1970, "Never moves back")
+    }
+
+    /// One item, linked to `https://example.com/<title>`.
+    private static func rss(_ title: String, _ date: String) -> Data {
+        Data("<rss version=\"2.0\"><channel><item><title>\(title)</title><link>https://example.com/\(title)</link><pubDate>\(date)</pubDate></item></channel></rss>".utf8)
+    }
+
+    /// One model from a followed lab.
+    private static func modelList(_ id: String, created: Date) -> Data {
+        Data(#"{"data":[{"id":"\#(id)","name":"Anthropic: Test","created":\#(Int(created.timeIntervalSince1970))}]}"#.utf8)
+    }
+
+    @MainActor
+    func testTurningNewsOnCountsFromTheFirstCheck() async throws {
+        defer { unstubNetwork() }
+        let models = Self.modelList("anthropic/claude-test", created: utc(2026, 9, 24))
+        let feed = Self.rss("2.1.300", "Thu, 24 Sep 2026 12:00:00 GMT")
+        stubNetwork { request in request.url == ModelFeed.url ? (200, models) : (200, feed) }
+        // The Mac makes its News store at first launch, weeks before News is turned on.
+        let news = NewsStore(defaults: makeDefaults(), directory: try makeFolder(), now: utc(2026, 9, 1))
+        news.followedSources = ["claude-code"]
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 25, 12))
+        XCTAssertEqual(news.models().count, 1)
+        XCTAssertEqual(news.announcements.count, 1)
+        XCTAssertEqual(news.unseenCount, 0, "What News finds when it's turned on isn't new")
+        XCTAssertFalse(news.isNew(utc(2026, 9, 24)))
+
+        let newer = Self.rss("2.1.301", "Sat, 26 Sep 2026 12:00:00 GMT")
+        StubURLProtocol.handler = { request in request.url == ModelFeed.url ? (304, Data()) : (200, newer) }
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 26, 13))
+        XCTAssertEqual(news.unseenAnnouncementCount, 1, "What later checks find is")
+    }
+
+    @MainActor
+    func testAnItemDatedAheadIsSeenOnceNewsOpens() async throws {
+        defer { unstubNetwork() }
+        // Two days ahead: a wrong time zone, or a post scheduled early.
+        let models = Self.modelList("anthropic/claude-ahead", created: utc(2026, 9, 27, 12))
+        let feed = Self.rss("Scheduled", "Sun, 27 Sep 2026 12:00:00 GMT")
+        stubNetwork { request in request.url == ModelFeed.url ? (200, models) : (200, feed) }
+        let folder = try makeFolder()
+        var checked = NewsCache()
+        checked.modelsFetchedAt = utc(2026, 9, 24)
+        checked.announcementsFetchedAt = utc(2026, 9, 24)
+        checked.save(to: folder)
+        let defaults = makeDefaults()
+        defaults.set(utc(2026, 9, 24).timeIntervalSince1970, forKey: NewsStore.Keys.seenAt)
+        let news = NewsStore(defaults: defaults, directory: folder)
+        news.followedSources = ["claude-code"]
+        let now = utc(2026, 9, 25, 12)
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: now)
+        XCTAssertEqual(news.announcements.first?.published, now, "Dated when it arrived")
+        XCTAssertEqual(news.models().first?.created, now)
+        XCTAssertEqual(news.unseenCount, 2)
+
+        news.markSeen(now: now.addingTimeInterval(3600))
+        XCTAssertEqual(news.unseenCount, 0, "Opening News clears it")
+
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 28))
+        XCTAssertEqual(news.announcements.first?.published, now, "Once its date has passed, it keeps the one it arrived with")
+        XCTAssertEqual(news.models().first?.created, now)
+        XCTAssertEqual(news.unseenCount, 0, "…so it isn't new again")
+    }
+
+    @MainActor
+    func testProblemsNameTheFeedsThatCouldntBeRead() async throws {
+        defer { unstubNetwork() }
+        let cursor = try XCTUnwrap(FeedSource.catalog.first { $0.id == "cursor" }).url
+        let devin = try XCTUnwrap(FeedSource.catalog.first { $0.id == "devin" }).url
+        // Each feed has one post of its own, titled by its host.
+        let post: @Sendable (URLRequest) -> Data = { Self.rss($0.url?.host ?? "post", "Thu, 24 Sep 2026 12:00:00 GMT") }
+        stubNetwork { request in
+            if request.url == ModelFeed.url { return (503, Data()) }
+            return request.url == cursor ? (200, Data("<rss><channel><item><title>Cut".utf8)) : (200, post(request))
+        }
+        let news = NewsStore(defaults: makeDefaults(), directory: try makeFolder(), now: utc(2026, 9, 25))
+        news.followedSources = ["cursor", "devin", "zai"]
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 25, 12))
+        XCTAssertEqual(news.modelProblem, "Couldn't read OpenRouter's model list.")
+        XCTAssertEqual(news.announcementProblem, "Couldn't read Cursor.")
+        XCTAssertEqual(Set(news.announcements.map(\.source)), ["Devin", "Z.ai"], "The others still read")
+
+        StubURLProtocol.handler = { _ in (500, Data()) }
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 25, 13))
+        XCTAssertEqual(news.announcementProblem, "Couldn't read the feeds.")
+        XCTAssertEqual(Set(news.announcements.map(\.source)), ["Devin", "Z.ai"], "What was read stays")
+
+        StubURLProtocol.handler = { request in
+            if request.url == ModelFeed.url { return (200, Self.noModels) }
+            return request.url == cursor || request.url == devin ? (404, Data()) : (200, post(request))
+        }
+        await news.refresh(maxAge: 0, preferences: AlertPreferences(), notifies: false, now: utc(2026, 9, 25, 14))
+        XCTAssertEqual(news.announcementProblem, "Couldn't read Cursor and Devin.")
+        XCTAssertNil(news.modelProblem, "A good answer clears it")
+    }
+
+    @MainActor
+    func testFeedsAddedSinceTheListWasSavedStartOn() {
+        let defaults = makeDefaults()
+        // Saved before MiniMax Code was in the catalog, with Cursor turned off.
+        let earlier = FeedSource.catalog.map(\.id).filter { $0 != "minimax-code" }
+        defaults.set(earlier.filter { $0 != "cursor" }, forKey: NewsStore.Keys.sources)
+        defaults.set(earlier, forKey: NewsStore.Keys.knownSources)
+        let news = NewsStore(defaults: defaults, directory: nil)
+        XCTAssertTrue(news.followedSources.contains("minimax-code"), "A feed added since starts on")
+        XCTAssertFalse(news.followedSources.contains("cursor"), "One turned off stays off")
+
+        news.followedSources.remove("minimax-code")
+        XCTAssertFalse(NewsStore(defaults: defaults, directory: nil).followedSources.contains("minimax-code"), "Turned off once offered, it stays off")
+    }
+
+    @MainActor
+    func testLabsAddedToTheDefaultsSinceTheListWasSavedStartOn() {
+        let defaults = makeDefaults()
+        // Saved when the defaults didn't have DeepSeek yet, with OpenAI turned off.
+        let earlier = ModelFeed.defaultVendors.subtracting(["deepseek"])
+        defaults.set(earlier.subtracting(["openai"]).sorted(), forKey: NewsStore.Keys.vendors)
+        defaults.set(earlier.sorted(), forKey: NewsStore.Keys.knownVendors)
+        let news = NewsStore(defaults: defaults, directory: nil)
+        XCTAssertTrue(news.followedVendors.contains("deepseek"), "A lab added to the defaults since starts on")
+        XCTAssertFalse(news.followedVendors.contains("openai"), "One turned off stays off")
+
+        let saved = makeDefaults()
+        saved.set(["anthropic"], forKey: NewsStore.Keys.vendors)
+        XCTAssertEqual(NewsStore(defaults: saved, directory: nil).followedVendors, Set(["anthropic"]).union(ModelFeed.defaultVendors.subtracting(NewsStore.firstDefaultVendors)), "A list saved by 2.0 had 2.0's defaults to choose from")
+    }
+
+    @MainActor
+    func testAListSavedBeforeTheCatalogWasRememberedKeepsItsChoices() {
+        let defaults = makeDefaults()
+        defaults.set(["claude-code", "cursor"], forKey: NewsStore.Keys.sources)
+        let news = NewsStore(defaults: defaults, directory: nil)
+        let addedSince = Set(FeedSource.catalog.map(\.id)).subtracting(NewsStore.firstCatalog)
+        XCTAssertEqual(news.followedSources, Set(["claude-code", "cursor"]).union(addedSince), "2.0 had offered every feed it knew")
     }
 }
 

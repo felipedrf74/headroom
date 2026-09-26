@@ -38,7 +38,8 @@ struct ReadingsTimelineProvider: AppIntentTimelineProvider {
 
     func timeline(for configuration: SelectProviderIntent, in context: Context) async -> Timeline<ReadingsEntry> {
         let now = Date.now
-        WidgetReloadLog.record(at: now)
+        // WidgetKit budgets each widget on its own; two set up alike reload together.
+        let reloads = WidgetReloadLog.record("\(context.family)-\(configuration.provider.rawValue)", at: now)
         let cache = await WidgetRefresher.cache(now: now)
         // One entry now and one at each reset in the next 8 hours, so meters empty on time.
         let horizon = now.addingTimeInterval(8 * 3600)
@@ -46,7 +47,7 @@ struct ReadingsTimelineProvider: AppIntentTimelineProvider {
         let dates = [now] + resets.sorted().prefix(11)
         return Timeline(
             entries: dates.map { ReadingsEntry.make(cache, choice: configuration.provider, date: $0) },
-            policy: .after(WidgetSchedule.nextReload(after: now, items: cache?.items ?? []))
+            policy: .after(WidgetSchedule.nextReload(after: now, items: cache?.items ?? [], reloads: reloads))
         )
     }
 }

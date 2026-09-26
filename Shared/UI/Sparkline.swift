@@ -38,6 +38,13 @@ struct Sparkline: View {
         .accessibilityHidden(true)
     }
 
+    /// What the line shows, for VoiceOver: its highest hour and the latest.
+    static func summary(_ history: UsageHistory) -> String {
+        let used = history.points.map { $0.used }
+        guard let latest = used.last, let highest = used.max() else { return "No readings" }
+        return "Highest \(TokenroomFormat.percentText(highest))%, latest \(TokenroomFormat.percentText(latest))%"
+    }
+
     /// Runs of consecutive readings, as (hour index, used %).
     static func segments(_ values: [UInt8?]) -> [[(Int, Double)]] {
         var segments: [[(Int, Double)]] = []

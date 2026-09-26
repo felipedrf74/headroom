@@ -15,8 +15,12 @@ struct CopilotClient: ProviderClient {
         let login = await BlockingIO.run({ CopilotCredentials.token() })
         var failure = ProviderError.signedOut(provider.signInHint)
         if let token = login {
+            var status: Int?
             do {
-                let data = try await TokenroomHTTP.get(Self.userURL, token: nil, headers: ["Authorization": "token \(token)"], provider: provider)
+                let request = TokenroomHTTP.request(Self.userURL, token: nil, headers: ["Authorization": "token \(token)"])
+                let (data, response) = try await TokenroomHTTP.data(for: request)
+                status = response.statusCode
+                try TokenroomHTTP.check(response, provider: provider)
                 return .success(try CopilotParser.snapshot(from: data))
             } catch let error as ProviderError {
                 if case .expired = error {
@@ -26,13 +30,7 @@ struct CopilotClient: ProviderClient {
             } catch {
                 failure = .unreachable
             }
-            // Only a missing or refused login falls back; an outage or rate limit stays one.
-            switch failure {
-            case .expired, .signedOut, .notEntitled, .parse:
-                break
-            default:
-                return .failure(failure)
-            }
+            guard Self.fallsBack(after: failure, status: status) else { return .failure(failure) }
         }
         let keys = self.keys
         guard let pasted = await BlockingIO.run({ keys.key(for: .copilot).map { ($0, keys.metadata(for: .copilot)?.region) } }) else {
@@ -46,6 +44,18 @@ struct CopilotClient: ProviderClient {
             return .failure(error)
         } catch {
             return .failure(.unreachable)
+        }
+    }
+
+    /// Whether a pasted token answers after the login failed this way: a missing or refused
+    /// login, or the private endpoint turning it down (400, 404, 422: no Copilot on that login, or
+    /// the endpoint changed). An outage or a rate limit stays one.
+    static func fallsBack(after failure: ProviderError, status: Int?) -> Bool {
+        switch failure {
+        case .expired, .signedOut, .notEntitled, .parse:
+            true
+        default:
+            status.map { [400, 404, 422].contains($0) } ?? false
         }
     }
 }

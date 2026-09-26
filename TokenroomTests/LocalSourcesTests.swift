@@ -35,6 +35,9 @@ final class LocalSourcesTests: XCTestCase {
         XCTAssertNil(LocalSources.semanticVersion(in: "unknown"))
         XCTAssertNil(LocalSources.semanticVersion(in: "build 2026.09.25"), "A date isn't a version")
         XCTAssertEqual(LocalSources.semanticVersion(in: "2026.09.25 agy 1.2.0"), [1, 2, 0])
+        XCTAssertEqual(LocalSources.semanticVersion(in: "agy 1.1.12."), [1, 1, 12], "A sentence's closing period isn't part of it")
+        XCTAssertEqual(LocalSources.semanticVersion(in: "agy 1.1.12.3"), [1, 1, 12, 3], "A fourth part is kept")
+        XCTAssertNil(LocalSources.semanticVersion(in: "build 2026.09.25.1"), "A dated build stamp still isn't one")
         XCTAssertTrue(LocalSources.version([1, 1, 11], isAtLeast: [1, 1, 11]))
         XCTAssertTrue(LocalSources.version([1, 2], isAtLeast: [1, 1, 11]))
         XCTAssertFalse(LocalSources.version([1, 1, 10], isAtLeast: [1, 1, 11]))
@@ -53,6 +56,9 @@ final class LocalSourcesTests: XCTestCase {
         XCTAssertTrue(allowed("agy version 1.1.12 (build 4f2c1a)\n"))
         XCTAssertTrue(allowed("1.2"), "A missing patch counts as zero")
         XCTAssertTrue(allowed("agy 2.0.0-beta.3"))
+        XCTAssertTrue(allowed("agy 1.1.12."))
+        XCTAssertTrue(allowed("agy 1.1.11.4"))
+        XCTAssertFalse(allowed("agy 1.1.10.9"), "A fourth part doesn't lift an older version")
         XCTAssertFalse(allowed("agy 1.1.10"))
         XCTAssertFalse(allowed("agy 1.0.99"))
         XCTAssertFalse(allowed("agy 0.9"))
@@ -80,5 +86,34 @@ final class LocalSourcesTests: XCTestCase {
         XCTAssertEqual(LocalSources.vscodeState("windsurfAuthStatus", database: database), #"{"apiKey":"placeholder"}"#)
         XCTAssertNil(LocalSources.vscodeState("missing", database: database))
         XCTAssertNil(LocalSources.vscodeState("windsurfAuthStatus", database: database.deletingLastPathComponent().appendingPathComponent("none.vscdb")))
+    }
+
+    /// A missing row is just signed out: the database is copied only when it can't be read in
+    /// place, never on every check.
+    func testVSCodeStateCopiesOnlyADatabaseItCantRead() throws {
+        let folder = try makeFolder()
+        let database = folder.appendingPathComponent("state.vscdb")
+        let sqlite = Process()
+        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqlite.arguments = [database.path, "CREATE TABLE ItemTable (key TEXT, value TEXT); INSERT INTO ItemTable VALUES ('cursorAuth/accessToken', 'placeholder'), ('blank', '');"]
+        try sqlite.run()
+        sqlite.waitUntilExit()
+        XCTAssertEqual(LocalSources.sqliteRead("cursorAuth/accessToken", path: database.path), .value("placeholder"))
+        XCTAssertEqual(LocalSources.sqliteRead("missing", path: database.path), .missing)
+        XCTAssertEqual(LocalSources.sqliteRead("blank", path: database.path), .missing)
+
+        var copies = 0
+        let countCopies: (URL) -> URL? = { _ in
+            copies += 1
+            return nil
+        }
+        XCTAssertNil(LocalSources.vscodeState("missing", database: database, copy: countCopies))
+        XCTAssertEqual(copies, 0, "Signed out isn't a reason to copy the database")
+
+        let unreadable = folder.appendingPathComponent("unreadable.vscdb")
+        try Data(repeating: 0x2A, count: 4096).write(to: unreadable)
+        XCTAssertEqual(LocalSources.sqliteRead("missing", path: unreadable.path), .unreadable)
+        XCTAssertNil(LocalSources.vscodeState("missing", database: unreadable, copy: countCopies))
+        XCTAssertEqual(copies, 1, "One that can't be read in place is")
     }
 }

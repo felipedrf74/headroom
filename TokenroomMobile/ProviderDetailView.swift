@@ -23,6 +23,7 @@ struct ProviderDetailView: View {
                     WindowDetail(
                         window: window,
                         history: reading.history[window.id],
+                        checkedAt: provider.checkedAt ?? provider.fetchedAt,
                         isStale: !provider.isLive,
                         tint: Color(hex: provider.tint)
                     )
@@ -94,6 +95,8 @@ struct ProviderDetailView: View {
 private struct WindowDetail: View {
     var window: RelayWindow
     var history: UsageHistory?
+    /// When the reading was last confirmed, so a month's spend projects from then.
+    var checkedAt: Date?
     var isStale: Bool
     var tint: Color
 
@@ -127,7 +130,7 @@ private struct WindowDetail: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(PaceStyle.color(pace.severity))
             }
-            if let forecast = Forecast.text(for: window, history: history) {
+            if let forecast = Forecast.text(for: window, history: history, checkedAt: checkedAt) {
                 Text(forecast)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

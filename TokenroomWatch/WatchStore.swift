@@ -15,6 +15,9 @@ final class WatchStore {
     static let resetSoonKind = "watch.resetSoon"
     /// How often to ask watchOS for a background refresh; it decides when.
     static let backgroundInterval: TimeInterval = 15 * 60
+    /// How long a refresh waits for iCloud before it counts as unreachable, so one that never
+    /// answers can't hold off every later refresh.
+    static let readBudget: TimeInterval = 10
 
     enum Problem: Equatable {
         case noAccount
@@ -64,14 +67,16 @@ final class WatchStore {
         isRefreshing = true
         defer { isRefreshing = false }
         lastRefresh = now
-        switch await RelayReadings.read(now: now) {
+        let outcome = await TimeLimit.run(Self.readBudget, otherwise: .failed) { await RelayReadings.read(now: now) }
+        switch outcome {
         case .readings(let fresh):
             problem = nil
             apply(fresh)
         case .noAccount:
-            problem = cache == nil ? .noAccount : nil
+            // An empty saved cache shows the problem too, rather than "No readings yet".
+            problem = items.isEmpty ? .noAccount : nil
         case .failed:
-            problem = cache == nil ? .unreachable : nil
+            problem = items.isEmpty ? .unreachable : nil
         case .unavailable:
             // A build without iCloud (no team): sample readings, clearly marked.
             if cache == nil {
@@ -81,20 +86,25 @@ final class WatchStore {
         }
     }
 
-    /// The newer of what's shown and `fresh`, saved for complications, which reload only when
-    /// something they'd draw changed.
+    /// `fresh` unless it holds an older reading of a provider shown (the iPhone's handover is
+    /// saved now even when it carries older readings), saved for complications.
+    /// Complications reload for what they'd draw differently; from the background, only for
+    /// what matters (`ReadingCache.reloadSignature`), as their reloads are budgeted. Smaller
+    /// changes show on their next timeline, which reads the saved readings.
     func apply(_ fresh: ReadingCache) {
-        if let cache, cache.savedAt > fresh.savedAt { return }
+        if let cache, !cache.isSample, !fresh.isAtLeastAsFresh(as: cache) { return }
         let changed = fresh.materialHash != cache?.materialHash
+        let matters = fresh.reloadSignature != cache?.reloadSignature
         cache = fresh
         if let cacheURL {
             try? fresh.save(to: cacheURL)
         }
-        if changed {
+        guard changed else { return }
+        if matters || WKApplication.shared().applicationState == .active {
             WidgetCenter.shared.reloadAllTimelines()
-            // The Smart Stack widget picks its moments from the readings; let it look again.
-            WidgetCenter.shared.invalidateRelevance(ofKind: WatchStore.resetSoonKind)
         }
+        // The Smart Stack widget picks its moments from the readings; let it look again.
+        WidgetCenter.shared.invalidateRelevance(ofKind: WatchStore.resetSoonKind)
     }
 
     func scheduleBackgroundRefresh(now: Date = .now) {

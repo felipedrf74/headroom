@@ -273,6 +273,8 @@ private struct ProvidersSettings: View {
 private struct KeysSettings: View {
     @Bindable var store: QuotaStore
     @State private var keySheet: Provider?
+    /// Counts closed key sheets; rows read their key again when it changes.
+    @State private var closedSheets = 0
 
     var body: some View {
         Form {
@@ -280,11 +282,11 @@ private struct KeysSettings: View {
                 ForEach(Provider.allCases.filter { $0.access == .codingPlanKey }) { provider in
                     VStack(alignment: .leading, spacing: 8) {
                         keyHeader(provider)
-                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys, reload: closedSheets) {
                             keySheet = provider
                         } onRemoved: {
                             // A key the coding tool keeps may still be there.
-                            Task { await store.refresh(force: true, providers: [provider]) }
+                            Task { await store.credentialsChanged(for: provider) }
                         }
                         .padding(.leading, 28)
                     }
@@ -300,10 +302,10 @@ private struct KeysSettings: View {
                 ForEach(Provider.allCases.filter { $0.descriptor.fallbackKey != nil }) { provider in
                     VStack(alignment: .leading, spacing: 8) {
                         keyHeader(provider)
-                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+                        KeyRow(provider: provider, keys: CredentialReaders.apiKeys, reload: closedSheets) {
                             keySheet = provider
                         } onRemoved: {
-                            Task { await store.refresh(force: true, providers: [provider]) }
+                            Task { await store.credentialsChanged(for: provider) }
                         }
                         .padding(.leading, 28)
                     }
@@ -336,10 +338,11 @@ private struct KeysSettings: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(item: $keySheet) { provider in
+        .sheet(item: $keySheet, onDismiss: { closedSheets += 1 }) { provider in
             AddKeySheet(provider: provider, keys: CredentialReaders.apiKeys) {
                 store.settings.setEnabled(provider, true)
-                Task { await store.refresh(force: true, providers: [provider]) }
+                // Checked now, not after the old key's spacing or a 429 it earned.
+                Task { await store.credentialsChanged(for: provider) }
             }
         }
         .onChange(of: store.pendingKeyProvider, initial: true) { _, provider in
@@ -364,7 +367,7 @@ private struct KeysSettings: View {
     private func keyedProvider(_ provider: Provider, budgetLabel: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             keyHeader(provider)
-            KeyRow(provider: provider, keys: CredentialReaders.apiKeys) {
+            KeyRow(provider: provider, keys: CredentialReaders.apiKeys, reload: closedSheets) {
                 keySheet = provider
             } onRemoved: {
                 store.settings.setEnabled(provider, false)
@@ -387,6 +390,8 @@ private struct KeysSettings: View {
 private struct KeyRow: View {
     var provider: Provider
     var keys: APIKeyStore
+    /// Changes when a key sheet closes, so a key saved there shows.
+    var reload = 0
     var onAdd: () -> Void
     var onRemoved: () -> Void
     @State private var metadata: APIKeyStore.Metadata?
@@ -431,7 +436,7 @@ private struct KeyRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task {
+        .task(id: reload) {
             let keys = self.keys
             let provider = self.provider
             let loaded = await BlockingIO.run { (keys.metadata(for: provider), LocalKeys.settingsCaption(for: provider)) }
@@ -441,13 +446,17 @@ private struct KeyRow: View {
     }
 
     private func remove() {
-        do {
-            try keys.remove(for: provider)
-            metadata = nil
-            message = nil
-            onRemoved()
-        } catch {
-            message = "Couldn't remove the key from the Keychain."
+        let keys = self.keys
+        let provider = self.provider
+        Task {
+            do {
+                try await BlockingIO.run { try keys.remove(for: provider) }
+                metadata = nil
+                message = nil
+                onRemoved()
+            } catch {
+                message = "Couldn't remove the key from the Keychain."
+            }
         }
     }
 }
@@ -504,13 +513,18 @@ private struct AddKeySheet: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 320)
             if let regions = provider.keySpec?.regions, !regions.isEmpty {
-                Picker(provider.keySpec?.choiceLabel ?? "Account", selection: $region) {
+                let picker = Picker(provider.keySpec?.choiceLabel ?? "Account", selection: $region) {
                     ForEach(regions, id: \.self) { Text($0).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                // Two regions fit side by side; Copilot's seven plans don't fit the sheet that way.
+                if regions.count > 2 {
+                    picker.pickerStyle(.menu)
+                } else {
+                    picker.pickerStyle(.segmented)
+                }
             }
             if let url = provider.keySpec?.createURL {
-                Link("Create a \(provider.keySpec?.label ?? "key")", destination: url)
+                Link(provider.keySpec?.createTitle ?? "Create a key", destination: url)
                     .font(.system(size: 11))
             }
             if let note = provider.keySpec?.note {
@@ -546,10 +560,16 @@ private struct AddKeySheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 if offerSaveAnyway {
-                    Button("Save Anyway") { save() }
+                    Button("Save Anyway") {
+                        Task { await save() }
+                    }
                 }
                 Button(working ? "Testing…" : (warning == nil ? "Test & Save" : "Save With This Key")) {
-                    warning == nil ? test() : save()
+                    if warning == nil {
+                        test()
+                    } else {
+                        Task { await save() }
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || working || (provider.key?.isAdmin == true && !acknowledgedAdmin))
@@ -560,6 +580,16 @@ private struct AddKeySheet: View {
         .onChange(of: key) { _, _ in
             // A different key needs its own test.
             warning = nil
+        }
+        .task {
+            // Replacing a key starts from the choice saved with it, such as its Copilot plan.
+            guard let spec = provider.keySpec, !spec.regions.isEmpty else { return }
+            let keys = self.keys
+            let provider = self.provider
+            let saved = await BlockingIO.run { keys.metadata(for: provider) }
+            if region == spec.initialChoice(saved: nil) {
+                region = spec.initialChoice(saved: saved)
+            }
         }
     }
 
@@ -580,7 +610,7 @@ private struct AddKeySheet: View {
                 if let found = check.warning {
                     warning = found
                 } else {
-                    save()
+                    await save()
                 }
             } catch ProviderError.expired {
                 message = provider.keySpec?.regions.isEmpty == false
@@ -599,14 +629,22 @@ private struct AddKeySheet: View {
         }
     }
 
-    private func save() {
+    /// The Keychain can block, so the write runs off the main thread.
+    private func save() async {
+        working = true
+        let key = self.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keys = self.keys
+        let provider = self.provider
+        let region = regionValue
+        let warning = self.warning
         do {
-            try keys.save(key.trimmingCharacters(in: .whitespacesAndNewlines), for: provider, region: regionValue, warning: warning)
+            try await BlockingIO.run { try keys.save(key, for: provider, region: region, warning: warning) }
             onSaved()
             dismiss()
         } catch {
             message = "Couldn't save the key in the Keychain."
         }
+        working = false
     }
 }
 
@@ -838,30 +876,54 @@ private struct RelaySettingsSection: View {
 
 /// Opt-in: read Claude usage from Claude Code's own status line.
 private struct ClaudeBridgeRow: View {
-    @State private var isOn = ClaudeStatusLineBridge.standard.isInstalled
+    /// Nil until `~/.claude/settings.json` has been read, off the main thread like every change to it.
+    @State private var isOn: Bool?
+    @State private var working = false
     @State private var message: String?
     @State private var overrides: [String] = []
+    /// Where settings.json linked before Tokenroom 2.0.0 replaced the link with a file.
+    @State private var replacedLink: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle("Read usage from Claude Code's status line", isOn: Binding(
-                get: { isOn },
+                get: { isOn ?? false },
                 set: { apply($0) }
             ))
             .toggleStyle(.checkbox)
-            Text(message ?? "Keeps Claude usage current without Claude's login. Adds a status line command to ~/.claude/settings.json (after a backup) and runs any status line you already have.")
+            .disabled(isOn == nil || working)
+            Text(message ?? "Keeps Claude usage current without Claude's login. Changes only the status line in ~/.claude/settings.json and runs any status line you already have.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if isOn, !overrides.isEmpty {
+            if isOn == true, !overrides.isEmpty {
                 Text("\(overrides.count == 1 ? "A project sets" : "\(overrides.count) projects set") its own status line, which replaces the bridge there: \(overrides.joined(separator: ", ")). Tokenroom never edits project settings.")
                     .font(.system(size: 11))
                     .foregroundStyle(TokenroomTokens.tight)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let replacedLink {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Tokenroom 2.0.0 replaced ~/.claude/settings.json, a link to \(replacedLink), with a file. If you keep it with your dotfiles, link it again; Tokenroom 2.0.1 leaves links alone.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(TokenroomTokens.tight)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Dismiss") {
+                        self.replacedLink = nil
+                        Task { await BlockingIO.run { ClaudeStatusLineBridge.standard.forgetReplacedLink() } }
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+        .task {
+            let bridge = ClaudeStatusLineBridge.standard
+            let state = await BlockingIO.run { (isInstalled: bridge.isInstalled, replacedLink: bridge.replacedLink()) }
+            isOn = state.isInstalled
+            replacedLink = state.replacedLink
         }
         .task(id: isOn) {
-            guard isOn else {
+            guard isOn == true else {
                 overrides = []
                 return
             }
@@ -871,20 +933,27 @@ private struct ClaudeBridgeRow: View {
 
     private func apply(_ enable: Bool) {
         let bridge = ClaudeStatusLineBridge.standard
-        do {
-            if enable {
-                try bridge.install()
-            } else {
-                try bridge.uninstall()
+        working = true
+        Task {
+            let outcome = await BlockingIO.run { () -> (isInstalled: Bool, message: String?, replacedLink: String?) in
+                do {
+                    if enable {
+                        try bridge.install()
+                    } else {
+                        try bridge.uninstall()
+                    }
+                    return (bridge.isInstalled, nil, bridge.replacedLink())
+                } catch let error as ClaudeStatusLineBridge.BridgeError {
+                    // What was wrong with the file: not JSON, two status lines, a link, read-only.
+                    return (bridge.isInstalled, error.errorDescription, bridge.replacedLink())
+                } catch {
+                    return (bridge.isInstalled, "Couldn't change ~/.claude/settings.json.", bridge.replacedLink())
+                }
             }
-            isOn = bridge.isInstalled
-            message = nil
-        } catch ClaudeStatusLineBridge.BridgeError.invalidSettings {
-            isOn = bridge.isInstalled
-            message = "Couldn't change ~/.claude/settings.json: it isn't valid JSON. Fix it, then try again."
-        } catch {
-            isOn = bridge.isInstalled
-            message = "Couldn't change ~/.claude/settings.json."
+            isOn = outcome.isInstalled
+            message = outcome.message
+            replacedLink = outcome.replacedLink
+            working = false
         }
     }
 }
