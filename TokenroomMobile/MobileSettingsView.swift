@@ -52,7 +52,8 @@ struct MobileSettingsView: View {
 
                 Section("About") {
                     LabeledContent("Version", value: TokenroomIdentity.version)
-                    LabeledContent("Widget updates, last 24 hours", value: "\(WidgetReloadLog.count())")
+                    // WidgetKit's budget is per widget, so the busiest one is what counts.
+                    LabeledContent("Busiest widget's updates, last 24 hours", value: "\(WidgetReloadLog.count())")
                     Link("Privacy", destination: TokenroomIdentity.privacyURL)
                     Link("Source Code", destination: TokenroomIdentity.repositoryURL)
                     Text("Tokenroom isn't affiliated with any of the providers it shows.")
@@ -186,7 +187,7 @@ struct KeyEditorView: View {
                         }
                     }
                     if let url = spec?.createURL {
-                        Link("Create a \(spec?.label ?? "key")", destination: url)
+                        Link(spec?.createTitle ?? "Create a key", destination: url)
                     }
                 } header: {
                     Text(spec?.label ?? "API key")
@@ -235,6 +236,10 @@ struct KeyEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             metadata = await store.metadata(for: provider)
+            // Replace Key starts from the choice saved with the key, such as its Copilot plan.
+            if let metadata, let spec {
+                region = spec.initialChoice(saved: metadata)
+            }
         }
         .onChange(of: key) { _, _ in
             // A different key needs its own test.

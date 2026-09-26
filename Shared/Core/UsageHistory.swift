@@ -6,6 +6,12 @@ import Foundation
 struct UsageHistory: Codable, Equatable, Sendable {
     static let capacity = 168
     static let step: TimeInterval = 3_600
+    /// Readings of one window can report reset times this far apart.
+    static let resetJitter: TimeInterval = 30 * 60
+    /// A reset used early shows as use falling by at least this many points, to half or less,
+    /// and to no more than `freshUse`: a window that just started.
+    static let resetDrop = 10.0
+    static let freshUse = 10.0
 
     /// Start of the first bucket, on an hour boundary.
     var start: Date
@@ -58,19 +64,49 @@ struct UsageHistory: Codable, Equatable, Sendable {
     /// anything changed.
     /// Some providers report a reset worked out from the current time, so it drifts by
     /// seconds between checks; that alone doesn't count as a change.
+    /// - Parameters:
+    ///   - percent: the reading's used %, and `length` the window's. With both, a reset used
+    ///     before its time (a banked one) is noted too, not only one whose time has passed.
     @discardableResult
-    mutating func recordResetTime(_ resetsAt: Date?, at date: Date) -> Bool {
+    mutating func recordResetTime(_ resetsAt: Date?, used percent: Double? = nil, length: TimeInterval? = nil, at date: Date) -> Bool {
         guard let resetsAt else { return false }
         defer { windowResetsAt = resetsAt }
-        guard let previous = windowResetsAt, resetsAt.timeIntervalSince(previous) > 30 * 60, previous <= date else {
+        guard let previous = windowResetsAt, resetsAt.timeIntervalSince(previous) > Self.resetJitter,
+              let reset = previous <= date ? previous : earlyReset(opening: resetsAt, used: percent, length: length, at: date)
+        else {
             return windowResetsAt.map { abs(resetsAt.timeIntervalSince($0)) > 15 * 60 } ?? true
         }
         var list = (resets ?? []).filter { $0 >= start }
-        if previous >= start, !list.contains(previous) {
-            list.append(previous)
+        if reset >= start, !list.contains(reset) {
+            list.append(reset)
         }
         resets = list
         return true
+    }
+
+    /// When a window ending at `resetsAt` opened, if that was a reset used early: use fell
+    /// sharply since the last reading, to near nothing, and the new window has begun. Noise and
+    /// a provider's rounding move use by a point or two, and a window sliding as old use ages
+    /// out, or a plan changed mid-window, rarely drops to almost nothing at once. Nil when it
+    /// wasn't one.
+    private func earlyReset(opening resetsAt: Date, used percent: Double?, length: TimeInterval?, at date: Date) -> Date? {
+        guard let percent, let length, let before = usedBefore(date),
+              before - percent >= Self.resetDrop, percent <= before / 2, percent <= Self.freshUse
+        else { return nil }
+        let opened = resetsAt.addingTimeInterval(-length)
+        guard opened <= date.addingTimeInterval(Self.resetJitter) else { return nil }
+        return min(opened, date)
+    }
+
+    /// The highest use recorded in the hour of `date`, or the latest earlier hour with a reading
+    /// when that's higher: what the window was at before a reading at `date`, whether that
+    /// reading is recorded yet or not.
+    private func usedBefore(_ date: Date) -> Double? {
+        let hour = Int((Self.hourStart(date).timeIntervalSince(start) / Self.step).rounded())
+        guard hour >= 0 else { return nil }
+        let own = hour < used.count ? used[hour] : nil
+        let earlier = used.prefix(min(hour, used.count)).last { $0 != nil } ?? nil
+        return [own, earlier].compactMap { $0 }.max().map { Double($0) }
     }
 
     /// The bucket for `date`, moving the week forward first when needed.

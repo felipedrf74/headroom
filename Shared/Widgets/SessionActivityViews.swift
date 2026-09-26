@@ -59,8 +59,10 @@ struct Countdown: View {
     var resetsAt: Date
 
     var body: some View {
-        if resetsAt > .now {
-            Text("Resets in \(Text(timerInterval: Date.now...resetsAt, countsDown: true))")
+        // One reading of the clock, so the range can't come out reversed.
+        let now = Date.now
+        if resetsAt > now {
+            Text("Resets in \(Text(timerInterval: now...resetsAt, countsDown: true))")
                 .monospacedDigit()
         } else {
             Text("Reset")

@@ -372,7 +372,7 @@ final class AlertTests: XCTestCase {
 
     func testSubscriptionFollowsTheChoices() {
         XCTAssertEqual(AlertPreferences().subscribedKeys, [
-            "threshold-80", "lowBalance-80", "threshold-95", "lowBalance-95",
+            "threshold-80", "threshold-95", "lowBalance-80", "lowBalance-95",
             "reset", "bankedNew", "bankedExpiring-48", "bankedExpiring-6", "test",
         ])
         var few = AlertPreferences()
@@ -381,6 +381,256 @@ final class AlertTests: XCTestCase {
         few.resets = false
         few.banked = false
         XCTAssertEqual(few.subscribedKeys, ["threshold-95", "test"], "Test alerts always come through")
+        var balancesOnly = AlertPreferences()
+        balancesOnly.thresholds = []
+        balancesOnly.resets = false
+        balancesOnly.banked = false
+        XCTAssertEqual(balancesOnly.subscribedKeys, ["lowBalance-80", "lowBalance-95", "test"], "Balances have their own switch")
+    }
+
+    func testBalancesFollowTheirOwnSwitchAlone() {
+        var balancesOnly = preferences
+        balancesOnly.thresholds = []
+        let alerts = AlertRules.alerts(previous: balance(remaining: 6), current: balance(remaining: 3), preferences: balancesOnly, now: now)
+        XCTAssertEqual(alerts.map(\.key), ["lowBalance-80"], "With the usage levels off, a low balance still warns")
+        let usage = AlertRules.alerts(previous: reading(used: 70), current: reading(used: 97), preferences: balancesOnly, now: now)
+        XCTAssertTrue(usage.isEmpty, "Usage windows follow the usage levels")
+    }
+
+    // MARK: Held alerts
+
+    func testAHeldEightyDoesNotFollowTheNinetyFive() {
+        let late = utc(2026, 9, 25, 23)
+        var ledger = AlertLedger()
+        ledger.process([reading(used: 70)], preferences: preferences, now: late)
+        let eighty = ledger.process([reading(used: 82)], preferences: preferences, now: late)
+        let ninetyFive = ledger.process([reading(used: 96)], preferences: preferences, now: late.addingTimeInterval(1800))
+        XCTAssertEqual(ninetyFive.map(\.level), [95])
+        XCTAssertEqual(ledger.due(preferences: preferences, now: late.addingTimeInterval(1800)).map(\.id), ninetyFive.map(\.id), "95% goes out at once, 80% waits")
+        ledger.markSent(ninetyFive.map(\.id), at: late.addingTimeInterval(1800))
+
+        let morning = utc(2026, 9, 26, 8, 5)
+        XCTAssertTrue(ledger.due(preferences: preferences, now: morning).isEmpty, "The 80% held overnight would arrive after the 95%")
+        ledger.process([], preferences: preferences, now: morning)
+        XCTAssertFalse(ledger.pending.contains { $0.alert.id == eighty.first?.id }, "Dropped")
+    }
+
+    func testAHeldEightyDoesNotFollowTheNinetyFiveAcrossAMovedReset() throws {
+        let late = utc(2026, 9, 25, 23)
+        let reset = now.addingTimeInterval(2 * 86_400)
+        var ledger = AlertLedger()
+        ledger.process([reading(used: 70, resetsAt: reset)], preferences: preferences, now: late)
+        let eighty = try XCTUnwrap(ledger.process([reading(used: 82, resetsAt: reset)], preferences: preferences, now: late).first)
+        // The provider moved the reset three hours on; the week goes on and crosses 95%.
+        let ninetyFive = ledger.process([reading(used: 96, resetsAt: reset.addingTimeInterval(3 * 3600))], preferences: preferences, now: late.addingTimeInterval(1800))
+        XCTAssertEqual(ninetyFive.map(\.level), [95])
+        XCTAssertNotEqual(AlertRules.id(of: eighty, atLevel: 95), ninetyFive.first?.id, "Named by different reset times")
+        ledger.markSent(ninetyFive.map(\.id), at: late.addingTimeInterval(1800))
+        XCTAssertTrue(ledger.due(preferences: preferences, now: utc(2026, 9, 26, 8, 5)).isEmpty, "The 80% held overnight still doesn't follow it")
+    }
+
+    func testAHeldAlertSaysHowLongIsLeftWhenItGoesOut() throws {
+        let late = utc(2026, 9, 25, 23)
+        var ledger = AlertLedger()
+        ledger.process([reading(used: 70)], preferences: preferences, now: late)
+        let raised = try XCTUnwrap(ledger.process([reading(used: 82)], preferences: preferences, now: late).first)
+        let morning = utc(2026, 9, 26, 8, 5)
+        let sent = try XCTUnwrap(ledger.due(preferences: preferences, now: morning).first)
+        XCTAssertEqual(sent.id, raised.id)
+        let left = try XCTUnwrap(RelativeTime.resets(try XCTUnwrap(raised.resetsAt), now: morning))
+        XCTAssertEqual(sent.body, left.prefix(1).uppercased() + left.dropFirst() + ".")
+        XCTAssertNotEqual(sent.body, raised.body)
+
+        let monthEnd = utc(2026, 10, 1)
+        let budget = try XCTUnwrap(AlertRules.alerts(previous: spend(700, resetsAt: monthEnd), current: spend(812.5, resetsAt: monthEnd), preferences: preferences, now: now).first)
+        let later = AlertRules.refreshed(budget, now: now.addingTimeInterval(3 * 86_400))
+        XCTAssertEqual(later.body, "\(AmountFormat.text(812.5, unit: "usd")) of \(AmountFormat.text(1000, unit: "usd")) so far. It resets in 2d 12h.")
+    }
+
+    func testAHeldAlertTurnedOffMeanwhileIsDropped() {
+        let late = utc(2026, 9, 25, 23)
+        var ledger = AlertLedger()
+        ledger.process([reading(used: 70)], preferences: preferences, now: late)
+        ledger.process([reading(used: 82)], preferences: preferences, now: late)
+        var off = preferences
+        off.thresholds = [95]
+        let morning = utc(2026, 9, 26, 8, 5)
+        XCTAssertTrue(ledger.due(preferences: off, now: morning).isEmpty)
+        ledger.process([], preferences: off, now: morning)
+        XCTAssertTrue(ledger.pending.isEmpty)
+    }
+
+    func testLongQuietHoursKeepHeldAlertsUntilTheyEnd() {
+        var long = preferences
+        long.quietStartHour = 18
+        long.quietEndHour = 16
+        let evening = utc(2026, 9, 25, 19)
+        var ledger = AlertLedger()
+        ledger.process([reading(used: 70)], preferences: long, now: evening)
+        let raised = ledger.process([reading(used: 82)], preferences: long, now: evening)
+        ledger.process([], preferences: long, now: evening.addingTimeInterval(20 * 3600))
+        XCTAssertEqual(ledger.pending.map(\.alert.id), raised.map(\.id), "22 quiet hours: still held after 20")
+        XCTAssertEqual(ledger.due(preferences: long, now: utc(2026, 9, 26, 16, 5)).map(\.id), raised.map(\.id))
+    }
+
+    func testAResetLongAgoIsNotNews() {
+        let daysAgo = now.addingTimeInterval(-3 * 86_400)
+        let alerts = AlertRules.alerts(previous: reading(used: 91, resetsAt: daysAgo), current: reading(used: 2, resetsAt: now.addingTimeInterval(4 * 86_400)), preferences: preferences, now: now)
+        XCTAssertFalse(alerts.contains { $0.kind == .reset }, "A device asleep for days doesn't announce a reset from then")
+    }
+
+    func testAMovedResetIsTheSameWindow() {
+        let reset = now.addingTimeInterval(3 * 3600)
+        let moved = AlertRules.alerts(previous: session(used: 85, resetsAt: reset), current: session(used: 86, resetsAt: reset.addingTimeInterval(3600)), preferences: preferences, now: now)
+        XCTAssertTrue(moved.isEmpty, "The provider moved the reset; the session goes on, already past 80%")
+        let dipped = AlertRules.alerts(previous: session(used: 85, resetsAt: reset), current: session(used: 81, resetsAt: reset.addingTimeInterval(3600)), preferences: preferences, now: now)
+        XCTAssertTrue(dipped.isEmpty, "A small dip isn't a new window either")
+        let farther = AlertRules.alerts(previous: session(used: 85, resetsAt: reset), current: session(used: 86, resetsAt: reset.addingTimeInterval(2 * 3600)), preferences: preferences, now: now)
+        XCTAssertEqual(farther.map(\.level), [80], "Two hours on is more than a quarter of a session: another window")
+        XCTAssertFalse(AlertRules.isSameInstance(
+            before: session(used: 85, resetsAt: reset).windows[0],
+            current: session(used: 4, resetsAt: reset.addingTimeInterval(5 * 3600)).windows[0],
+            now: now
+        ), "Use falling away means the window started over early")
+    }
+
+    func testABalanceAlertNamedByDayPointsAtTheDaysAround() throws {
+        let alert = try XCTUnwrap(AlertRules.alerts(previous: balance(remaining: 6), current: balance(remaining: 3), preferences: preferences, now: now).first)
+        XCTAssertEqual(alert.instanceName, "d20721")
+        XCTAssertEqual(AlertRules.neighbouringDayIDs(of: alert), ["d20720", "d20722"].map { alert.id.replacingOccurrences(of: "d20721", with: $0) })
+        let weekly = try XCTUnwrap(AlertRules.alerts(previous: reading(used: 70), current: reading(used: 82), preferences: preferences, now: now).first)
+        XCTAssertEqual(AlertRules.neighbouringDayIDs(of: weekly), [], "A window with a reset is named by it, the same on every device")
+        let fromOlderBuild = UsageAlert(id: "evt-deepseek-balance-usd-low-80-d20721", provider: "deepseek", kind: .lowBalance, level: 80, title: "", body: "", isUrgent: false)
+        XCTAssertEqual(AlertRules.neighbouringDayIDs(of: fromOlderBuild), ["evt-deepseek-balance-usd-low-80-d20720", "evt-deepseek-balance-usd-low-80-d20722"])
+    }
+
+    // MARK: Sharing the choices
+
+    func testChoicesMadeOnEachDeviceBothStay() {
+        let utc = TimeZone(identifier: "UTC")!
+        var base = preferences
+        base.touch(now: now, timeZone: utc)
+        var mac = base
+        mac.quietHours = false
+        mac.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        var phone = base
+        phone.thresholds = [95]
+        phone.touch(now: now.addingTimeInterval(30), timeZone: utc)
+
+        let resolution = AlertPreferencesSync.resolve(base: base, local: mac, remote: phone)
+        XCTAssertTrue(resolution.needsPublish)
+        XCTAssertFalse(resolution.preferences.quietHours, "The Mac's change")
+        XCTAssertEqual(resolution.preferences.thresholds, [95], "The iPhone's, made while the Mac's copy was older, isn't undone")
+        XCTAssertEqual(resolution.preferences.updatedAt, now.addingTimeInterval(60))
+    }
+
+    func testSyncTakesChangesFromICloudAndSendsOnesMadeHere() {
+        let utc = TimeZone(identifier: "UTC")!
+        var base = preferences
+        base.touch(now: now, timeZone: utc)
+        var remote = base
+        remote.banked = false
+        remote.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        XCTAssertEqual(AlertPreferencesSync.resolve(base: base, local: base, remote: remote), AlertPreferencesSync.Resolution(preferences: remote, needsPublish: false), "Nothing changed here: take iCloud's")
+
+        var local = base
+        local.resets = false
+        local.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        XCTAssertEqual(AlertPreferencesSync.resolve(base: base, local: local, remote: base), AlertPreferencesSync.Resolution(preferences: local, needsPublish: true), "Changed only here, offline say: send it")
+        XCTAssertTrue(AlertPreferencesSync.resolve(base: nil, local: local, remote: nil).needsPublish)
+        XCTAssertFalse(AlertPreferencesSync.resolve(base: nil, local: AlertPreferences(), remote: nil).needsPublish, "Never changed: nothing to share")
+
+        var reloaded = base
+        reloaded.updatedAt = base.updatedAt?.addingTimeInterval(0.000_000_1)
+        XCTAssertFalse(AlertPreferencesSync.resolve(base: base, local: reloaded, remote: remote).needsPublish, "A saved copy's date coming back a hair off isn't a change")
+    }
+
+    func testThresholdLevelsMergeOneByOne() {
+        let utc = TimeZone(identifier: "UTC")!
+        var base = preferences
+        base.touch(now: now, timeZone: utc)
+        var phone = base
+        phone.thresholds = [95]
+        phone.touch(now: now.addingTimeInterval(30), timeZone: utc)
+        var mac = base
+        mac.thresholds = [80]
+        mac.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        let resolution = AlertPreferencesSync.resolve(base: base, local: mac, remote: phone)
+        XCTAssertTrue(resolution.needsPublish)
+        XCTAssertEqual(resolution.preferences.thresholds, [], "80% turned off on the iPhone and 95% on the Mac: both stay off")
+
+        var fewer = base
+        fewer.thresholds = [95]
+        var added = fewer
+        added.thresholds = [80, 95]
+        added.touch(now: now.addingTimeInterval(30), timeZone: utc)
+        var removed = fewer
+        removed.thresholds = []
+        removed.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        XCTAssertEqual(AlertPreferencesSync.resolve(base: fewer, local: removed, remote: added).preferences.thresholds, [80], "80% added there, 95% removed here")
+    }
+
+    /// A copy dated before the base is still the shared copy: its device's clock may run behind,
+    /// or an older Tokenroom dated it by that clock. (A read that began before the iPhone's own
+    /// save finished is the iPhone's to skip, by when the read began.)
+    func testACopyDatedBeforeTheBaseIsStillTaken() {
+        let utc = TimeZone(identifier: "UTC")!
+        var base = preferences
+        base.touch(now: now.addingTimeInterval(60), timeZone: utc)
+        var behind = base
+        behind.resets = false
+        behind.updatedAt = now
+        XCTAssertEqual(AlertPreferencesSync.resolve(base: base, local: base, remote: behind), AlertPreferencesSync.Resolution(preferences: behind, needsPublish: false), "Taken")
+
+        var changed = base
+        changed.banked = false
+        changed.touch(now: now.addingTimeInterval(120), timeZone: utc)
+        let merged = AlertPreferencesSync.resolve(base: base, local: changed, remote: behind)
+        XCTAssertTrue(merged.needsPublish)
+        XCTAssertFalse(merged.preferences.resets, "Its change")
+        XCTAssertFalse(merged.preferences.banked, "And this one's")
+    }
+
+    func testChoicesSentAreNeverDatedBeforeTheCopyTheyBuildOn() {
+        let utc = TimeZone(identifier: "UTC")!
+        var base = preferences
+        // From a device whose clock runs ahead…
+        base.touch(now: now.addingTimeInterval(600), timeZone: utc)
+        var local = base
+        local.quietHours = false
+        // …changed on one whose clock runs behind.
+        local.touch(now: now, timeZone: utc)
+        let resolution = AlertPreferencesSync.resolve(base: base, local: local, remote: base)
+        XCTAssertTrue(resolution.needsPublish)
+        XCTAssertFalse(resolution.preferences.quietHours)
+        XCTAssertEqual(resolution.preferences.updatedAt, base.updatedAt, "Otherwise the other device would take it for an older copy")
+        XCTAssertEqual(AlertPreferencesSync.resolve(base: base, local: base, remote: resolution.preferences).preferences, resolution.preferences, "It takes it")
+    }
+
+    func testADeviceNewToSyncingKeepsChoicesOnlyTheSharedCopyKnows() throws {
+        let remote = try RelayEnvelope.decoder.decode(AlertPreferences.self, from: Data(#"{"thresholds":[95],"digest":{"hour":9},"updatedAt":1790000000}"#.utf8))
+        var local = preferences
+        local.resets = false
+        local.touch(now: Date(timeIntervalSince1970: 1_790_000_600), timeZone: TimeZone(identifier: "UTC")!)
+        let resolution = AlertPreferencesSync.resolve(base: nil, local: local, remote: remote)
+        XCTAssertTrue(resolution.needsPublish)
+        XCTAssertFalse(resolution.preferences.resets, "The newer copy's choices")
+        XCTAssertEqual(resolution.preferences.thresholds, [80, 95])
+        let written = try XCTUnwrap(JSONSerialization.jsonObject(with: RelayEnvelope.encoder.encode(resolution.preferences)) as? [String: Any])
+        XCTAssertNotNil(written["digest"], "A choice from a newer Tokenroom stays")
+    }
+
+    func testChoicesANewerVersionAddedSurviveBeingSavedHere() throws {
+        let saved = Data(#"{"thresholds":[95],"digest":{"hour":9,"days":[1,5]},"quietHours":false}"#.utf8)
+        var preferences = try RelayEnvelope.decoder.decode(AlertPreferences.self, from: saved)
+        preferences.resets = false
+        let written = try RelayEnvelope.encoder.encode(preferences)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        let digest = try XCTUnwrap(object["digest"] as? [String: Any])
+        XCTAssertEqual(digest["hour"] as? Int, 9, "A choice this build doesn't know goes back as it came")
+        XCTAssertEqual(digest["days"] as? [Int], [1, 5])
+        XCTAssertEqual(object["resets"] as? Bool, false)
+        XCTAssertEqual(try RelayEnvelope.decoder.decode(AlertPreferences.self, from: written), preferences)
     }
 
     func testEveryAlertTheRulesRaiseIsSubscribedByDefault() {

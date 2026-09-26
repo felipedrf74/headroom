@@ -17,10 +17,14 @@ final class FoundationTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Named by the class and a count rather than at random: macOS keeps an empty preferences
+    /// file for every name, so runs reuse a few instead of leaving one behind per test.
     private func makeDefaults() -> UserDefaults {
-        let name = "tokenroom.tests.\(UUID().uuidString)"
+        let name = "tokenroom.tests.\(Self.self).\(suites.count)"
         suites.append(name)
-        return UserDefaults(suiteName: name)!
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
     }
 
     private func makeFolder() throws -> URL {
@@ -358,6 +362,125 @@ final class FoundationTests: XCTestCase {
     }
 
     @MainActor
+    func testAMissingLoginDoesNotSpaceOutTheNextCheck() async throws {
+        let client = ScriptedClient(provider: .claude, results: [
+            .failure(.signedOut(Provider.claude.signInHint)),
+            .success(snapshot(.claude)),
+        ])
+        let store = QuotaStore(
+            settings: AppSettings(defaults: makeDefaults()),
+            clients: [client],
+            cache: SnapshotCache(directory: try makeFolder())
+        )
+        await store.refresh(force: true)
+        await store.refresh(force: true)
+        XCTAssertEqual(client.calls, 2, "Nothing was called without a login: signing in is met with a check")
+        guard case .live = store.statuses[.claude] else {
+            return XCTFail("Expected live, got \(String(describing: store.statuses[.claude]))")
+        }
+
+        // A refused session may have reached the server, so it keeps the spacing.
+        let refused = ScriptedClient(provider: .claude, results: [.failure(.expired(Provider.claude.expiredHint)), .success(snapshot(.claude))])
+        let other = QuotaStore(settings: AppSettings(defaults: makeDefaults()), clients: [refused], cache: SnapshotCache(directory: try makeFolder()))
+        await other.refresh(force: true)
+        await other.refresh(force: true)
+        XCTAssertEqual(refused.calls, 1)
+    }
+
+    @MainActor
+    func testChecksThatAllFailedToConnectDontSpaceOutTheNext() async throws {
+        let defaults = makeDefaults()
+        defaults.set(["claude", "antigravity"], forKey: "enabledProviders")
+        let claude = ScriptedClient(provider: .claude, results: [.failure(.unreachable), .success(snapshot(.claude))])
+        let agy = ScriptedClient(provider: .antigravity, results: [.failure(.unreachable), .success(snapshot(.antigravity))])
+        let store = QuotaStore(settings: AppSettings(defaults: defaults), clients: [claude, agy], cache: SnapshotCache(directory: try makeFolder()))
+        await store.refresh(force: true)
+        await store.refresh(force: true)
+        XCTAssertEqual(claude.calls, 2, "Nothing answered at all: the Mac was offline, so no call counts")
+        XCTAssertEqual(agy.calls, 2)
+    }
+
+    @MainActor
+    func testSigningInIsCheckedAtOnce() async throws {
+        let client = ScriptedClient(provider: .claude, results: [
+            .failure(.unreachable),
+            .success(snapshot(.claude)),
+        ])
+        let store = QuotaStore(
+            settings: AppSettings(defaults: makeDefaults()),
+            clients: [client],
+            cache: SnapshotCache(directory: try makeFolder())
+        )
+        await store.refresh(force: true)
+        await store.credentialsChanged(for: .claude)
+        XCTAssertEqual(client.calls, 2, "New credentials aren't held to the old ones' spacing")
+        XCTAssertEqual(client.credentialChanges, 1, "The client forgets what it kept from the old login")
+    }
+
+    func testSigningInClearsClaudesOwnWait() {
+        let now = Date()
+        let client = ClaudeClient()
+        client.state.recordDirect(snapshot(.claude, fetchedAt: now))
+        client.state.block(until: now.addingTimeInterval(3600))
+        client.credentialsChanged()
+        XCTAssertNil(client.state.blockedUntil, "Claude's Retry-After came from the old login")
+        XCTAssertNil(client.state.lastDirect, "So did its last direct read")
+    }
+
+    @MainActor
+    func testARateLimitedProviderStillTakesLocalReadings() async throws {
+        let local = snapshot(.claude, used: 55)
+        let client = ScriptedClient(provider: .claude, results: [.failure(.rateLimited(until: Date().addingTimeInterval(3600)))], between: local)
+        let store = QuotaStore(
+            settings: AppSettings(defaults: makeDefaults()),
+            clients: [client],
+            cache: SnapshotCache(directory: try makeFolder())
+        )
+        await store.refresh(force: true)
+        await store.refresh(force: true)
+        XCTAssertEqual(client.calls, 1, "No call before Retry-After")
+        XCTAssertEqual(client.betweenCalls.count, 1, "Claude's status line still counts meanwhile")
+        XCTAssertEqual(store.statuses[.claude]?.snapshot?.usedPercent, 55)
+    }
+
+    @MainActor
+    func testForcedRefreshesDuringACheckShareOneMore() async throws {
+        let client = GatedClient(provider: .cursor)
+        let store = QuotaStore(
+            settings: AppSettings(defaults: makeDefaults()),
+            clients: [client],
+            cache: SnapshotCache(directory: try makeFolder())
+        )
+        let first = Task { await store.refresh(force: true) }
+        while client.calls == 0 {
+            await Task.yield()
+        }
+        let waiting = (0..<3).map { _ in Task { await store.refresh(force: true) } }
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+        client.release()
+        await first.value
+        for task in waiting {
+            await task.value
+        }
+        XCTAssertEqual(client.calls, 2, "Three refreshes asked for during a check share one more, not three overlapping ones")
+    }
+
+    func testTheSameResetWithinAMinuteIsNoChange() {
+        let reset = Date(timeIntervalSince1970: 1_790_400_000.123_456)
+        var direct = snapshot(.claude, used: 40, resetsAt: reset)
+        direct.windows[0].resetsAt = reset
+        var bridge = direct
+        bridge.resetsAt = reset.addingTimeInterval(-0.123_456)
+        bridge.windows[0].resetsAt = reset.addingTimeInterval(-0.123_456)
+        bridge.source = "bridge"
+        XCTAssertTrue(QuotaStore.usageEqual(direct, bridge), "Microseconds from one source, whole seconds from the other")
+        bridge.windows[0].resetsAt = reset.addingTimeInterval(3600)
+        XCTAssertFalse(QuotaStore.usageEqual(direct, bridge))
+    }
+
+    @MainActor
     func testARestingProviderStillTakesACheapLocalReading() async throws {
         let now = Date()
         let direct = snapshot(.claude, used: 40, fetchedAt: now.addingTimeInterval(-60))
@@ -576,6 +699,56 @@ final class FoundationTests: XCTestCase {
 
 /// Returns queued results in order, then repeats the last one. Between calls it answers with
 /// `between`, like Claude's status line.
+/// A client whose calls wait until `release()`, to hold a check in flight.
+private final class GatedClient: ProviderClient, @unchecked Sendable {
+    let provider: Provider
+    private let lock = NSLock()
+    private var count = 0
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(provider: Provider) {
+        self.provider = provider
+    }
+
+    var calls: Int {
+        lock.withLock { count }
+    }
+
+    func fetch() async -> Result<QuotaSnapshot, ProviderError> {
+        let waits = lock.withLock { () -> Bool in
+            count += 1
+            return !isOpen
+        }
+        if waits {
+            await withCheckedContinuation { continuation in
+                let resumeNow = lock.withLock { () -> Bool in
+                    if isOpen { return true }
+                    waiting.append(continuation)
+                    return false
+                }
+                if resumeNow {
+                    continuation.resume()
+                }
+            }
+        }
+        let now = Date()
+        return .success(QuotaSnapshot(
+            provider: provider, usedPercent: 40, resetsAt: now.addingTimeInterval(86_400), fetchedAt: now, primaryTitle: "This cycle",
+            windows: [QuotaWindow(id: "cycle", kind: .billingCycle, title: "This cycle", usedPercent: 40, resetsAt: now.addingTimeInterval(86_400))]
+        ))
+    }
+
+    func release() {
+        let continuations = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            isOpen = true
+            defer { waiting = [] }
+            return waiting
+        }
+        continuations.forEach { $0.resume() }
+    }
+}
+
 private final class ScriptedClient: ProviderClient, @unchecked Sendable {
     let provider: Provider
     private let lock = NSLock()
@@ -611,5 +784,16 @@ private final class ScriptedClient: ProviderClient, @unchecked Sendable {
             previousSnapshots.append(previous)
             return between
         }
+    }
+
+    private var changes = 0
+
+    /// How many times `credentialsChanged` was called.
+    var credentialChanges: Int {
+        lock.withLock { changes }
+    }
+
+    func credentialsChanged() {
+        lock.withLock { changes += 1 }
     }
 }

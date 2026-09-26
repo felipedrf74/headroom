@@ -12,12 +12,14 @@ struct TokenroomMobileApp: App {
         WindowGroup {
             RootView(store: store, news: news)
                 .task {
-                    // Also saves the push subscriptions, once iCloud answers.
-                    await store.refresh(force: true)
+                    // Also saves the push subscriptions, once iCloud answers. Not forced: when
+                    // coming forward already started one, this is that refresh.
+                    await store.refresh()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
+                        store.becameActive()
                         Task {
                             await store.refresh()
                             // Feeds older than an hour, so the News badge is current on open.

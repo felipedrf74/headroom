@@ -1,7 +1,7 @@
 import XCTest
 @testable import Tokenroom
 
-/// Copilot, Devin, and Antigravity: providers read with another tool's login on the Mac.
+/// Copilot, Cursor, Devin, and Antigravity: providers read with another tool's login on the Mac.
 final class LocalProviderTests: XCTestCase {
     private func fixture(_ name: String) -> Data {
         try! Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/\(name).json"))
@@ -79,7 +79,7 @@ final class LocalProviderTests: XCTestCase {
     func testCopilotBillingPlans() throws {
         let pro = try CopilotBilling.snapshot(used: 600.5, plan: CopilotBilling.plan(named: "Pro"), now: now)
         let credits = try XCTUnwrap(pro.windows.first)
-        XCTAssertEqual(credits.id, "ai_credits")
+        XCTAssertEqual(credits.id, "premium_interactions", "The login's ID for the same bucket, so history and alerts carry on when the source changes")
         XCTAssertEqual(credits.title, "AI credits")
         XCTAssertEqual(credits.usedPercent, 600.5 / 1_500 * 100, accuracy: 0.001)
         XCTAssertEqual(credits.amount, QuotaAmount(used: 600.5, limit: 1_500, remaining: 899.5, unit: "credits"))
@@ -116,6 +116,19 @@ final class LocalProviderTests: XCTestCase {
         let snapshot = try CopilotBilling.snapshot(used: 10, plan: CopilotBilling.plan(named: "Pro"), now: lastEvening)
         XCTAssertEqual(snapshot.resetsAt, utc(2027, 1, 1))
         XCTAssertEqual(snapshot.windows.first?.startsAt, utc(2026, 12, 1))
+    }
+
+    /// A pasted token answers when the login is missing or refused, or when the private endpoint
+    /// turns it down; an outage or a rate limit doesn't send the token out.
+    func testCopilotFallsBackOnlyWhenTheLoginCantBeUsed() {
+        XCTAssertTrue(CopilotClient.fallsBack(after: .expired(Provider.copilot.expiredHint), status: 401))
+        XCTAssertTrue(CopilotClient.fallsBack(after: .signedOut(Provider.copilot.signInHint), status: nil))
+        for status in [400, 404, 422] {
+            XCTAssertTrue(CopilotClient.fallsBack(after: .unreachable, status: status), "\(status)")
+        }
+        XCTAssertFalse(CopilotClient.fallsBack(after: .unreachable, status: 503))
+        XCTAssertFalse(CopilotClient.fallsBack(after: .rateLimited(until: nil), status: 429))
+        XCTAssertFalse(CopilotClient.fallsBack(after: .unreachable, status: nil), "No answer at all")
     }
 
     func testCopilotWithoutQuotasIsNotEntitled() {
@@ -161,6 +174,87 @@ final class LocalProviderTests: XCTestCase {
         XCTAssertEqual(CopilotCredentials.decodeKeyring("go-keyring-base64:" + Data("placeholder".utf8).base64EncodedString()), "placeholder")
         XCTAssertEqual(CopilotCredentials.decodeKeyring("go-keyring-encoded:706c616365686f6c646572"), "placeholder")
         XCTAssertEqual(CopilotCredentials.decodeKeyring("placeholder"), "placeholder")
+    }
+
+    // MARK: Cursor
+
+    /// A Keychain token past its expiry gives way to a current one in `state.vscdb`, which an
+    /// older Cursor keeps refreshing. Otherwise the Keychain's stays first, as before.
+    func testAnExpiredCursorKeychainTokenGivesWayToACurrentDatabaseToken() throws {
+        let folder = try makeFolder()
+        let expired = Self.jwt(expiringAt: now.addingTimeInterval(-3600))
+        let current = Self.jwt(expiringAt: now.addingTimeInterval(30 * 86_400))
+        let database = folder.appendingPathComponent("state.vscdb")
+        try makeItemTable(database, key: "cursorAuth/accessToken", value: current)
+        func token(keychain: String?, database: URL) throws -> String {
+            try CredentialReaders.cursorAccessToken(keychain: { _ in keychain }, database: database, usesCache: false, now: now)
+        }
+
+        XCTAssertEqual(try token(keychain: expired, database: database), current)
+        let newer = Self.jwt(expiringAt: now.addingTimeInterval(60 * 86_400))
+        XCTAssertEqual(try token(keychain: newer, database: database), newer, "A current Keychain token stays first")
+        XCTAssertEqual(try token(keychain: "placeholder-opaque", database: database), "placeholder-opaque", "A token that isn't a JWT is the server's to judge")
+
+        let older = folder.appendingPathComponent("older.vscdb")
+        try makeItemTable(older, key: "cursorAuth/accessToken", value: Self.jwt(expiringAt: now.addingTimeInterval(-86_400)))
+        XCTAssertEqual(try token(keychain: expired, database: older), expired, "Both expired: the Keychain's, as before")
+        XCTAssertEqual(try token(keychain: expired, database: folder.appendingPathComponent("missing.vscdb")), expired)
+    }
+
+    /// A Keychain token Cursor refused before its expiry (revoked) isn't tried first again: the
+    /// database's goes first until the Keychain holds another, so a check makes one call, not two.
+    func testARefusedCursorKeychainTokenIsntTriedFirstAgain() throws {
+        // The token cache is shared with the rest of the process.
+        defer { CredentialReaders.invalidateCaches() }
+        let folder = try makeFolder()
+        let revoked = Self.jwt(expiringAt: now.addingTimeInterval(31 * 86_400))
+        let working = Self.jwt(expiringAt: now.addingTimeInterval(21 * 86_400))
+        let database = folder.appendingPathComponent("state.vscdb")
+        try makeItemTable(database, key: "cursorAuth/accessToken", value: working)
+        func token(keychain: String, database: URL = database) throws -> String {
+            try CredentialReaders.cursorAccessToken(keychain: { _ in keychain }, database: database, usesCache: false, now: now)
+        }
+
+        XCTAssertEqual(try token(keychain: revoked), revoked, "Current, so first")
+        XCTAssertEqual(CredentialReaders.cursorTokenAfterRefusal(of: revoked, database: database, now: now), working)
+        XCTAssertEqual(try token(keychain: revoked), working, "Refused: the database's first from now on")
+        XCTAssertNil(CredentialReaders.cursorTokenAfterRefusal(of: working, database: database, now: now), "Both refused: nothing else to try")
+        XCTAssertEqual(try token(keychain: revoked), working, "A database token refused doesn't take the Keychain's place")
+
+        let expired = folder.appendingPathComponent("expired.vscdb")
+        try makeItemTable(expired, key: "cursorAuth/accessToken", value: Self.jwt(expiringAt: now.addingTimeInterval(-3600)))
+        XCTAssertNil(CredentialReaders.cursorTokenAfterRefusal(of: revoked, database: expired, now: now), "An expired database token can only fail")
+        XCTAssertEqual(try token(keychain: revoked, database: expired), revoked, "With nothing better, the Keychain's is still tried: a refusal may not last")
+
+        let signedInAgain = Self.jwt(expiringAt: now.addingTimeInterval(41 * 86_400))
+        XCTAssertEqual(try token(keychain: signedInAgain), signedInAgain, "A new Keychain token goes first again")
+    }
+
+    func testTokenExpiryReadsOnlyAJWTsExp() {
+        XCTAssertTrue(CredentialReaders.tokenHasExpired(Self.jwt(expiringAt: now.addingTimeInterval(-1)), now: now))
+        XCTAssertFalse(CredentialReaders.tokenHasExpired(Self.jwt(expiringAt: now.addingTimeInterval(60)), now: now))
+        XCTAssertFalse(CredentialReaders.tokenHasExpired("placeholder", now: now))
+        XCTAssertFalse(CredentialReaders.tokenHasExpired("placeholder.not-base64.placeholder", now: now), "Claims that can't be read count as current")
+    }
+
+    /// An unsigned, JWT-shaped placeholder that carries only an expiry.
+    private static func jwt(expiringAt date: Date) -> String {
+        func part(_ json: String) -> String {
+            Data(json.utf8).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+        return [part(#"{"alg":"none"}"#), part(#"{"exp":\#(Int(date.timeIntervalSince1970))}"#), "placeholder"].joined(separator: ".")
+    }
+
+    private func makeItemTable(_ url: URL, key: String, value: String) throws {
+        let sqlite = Process()
+        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqlite.arguments = [url.path, "CREATE TABLE ItemTable (key TEXT, value TEXT); INSERT INTO ItemTable VALUES ('\(key)', '\(value)');"]
+        try sqlite.run()
+        sqlite.waitUntilExit()
+        XCTAssertEqual(sqlite.terminationStatus, 0)
     }
 
     // MARK: Devin

@@ -182,6 +182,25 @@ final class RequestTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requests.last?.url?.host, "api.deepseek.com")
     }
 
+    /// A prepaid-only team has no invoice, so its credits stand in for the reading. A monthly
+    /// budget measures spend: it mustn't read $25 of credits left as $975 spent.
+    func testAMonthlyBudgetLeavesAPrepaidTeamsCreditsAlone() async throws {
+        let validation = fixture("xai-validation")
+        let prepaid = fixture("xai-prepaid-balance")
+        stub { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/management-keys/validation") { return (200, validation) }
+            if path.hasSuffix("/teams/team-placeholder/prepaid/balance") { return (200, prepaid) }
+            return (404, Data())
+        }
+        let snapshot = try await APIKeyClient.orgSnapshot(for: .xaiOrg, key: "placeholder", now: now)
+        XCTAssertEqual(snapshot.windows.map(\.title), ["Prepaid credits"])
+        XCTAssertEqual(snapshot.windows.first?.amount?.remaining ?? 0, 25, accuracy: 0.001)
+        let budgeted = snapshot.applyingBudget(1000)
+        XCTAssertEqual(budgeted, snapshot, "Still $25 of credits, not a meter")
+        XCTAssertFalse(budgeted.windows.first?.isMetered ?? true)
+    }
+
     // MARK: Copilot with a fine-grained token
 
     func testCopilotTokenReadsThisMonthsAICredits() async throws {
@@ -199,6 +218,7 @@ final class RequestTests: XCTestCase {
         }
         let snapshot = try await APIKeyClient.copilotSnapshot(key: "placeholder", planName: "Pro+", now: now)
         XCTAssertEqual(snapshot.planLabel, "Copilot Pro+")
+        XCTAssertEqual(snapshot.windows.map(\.id), ["premium_interactions"], "The ID the Mac's login read gives this bucket")
         XCTAssertEqual(snapshot.windows.first?.amount?.used ?? 0, 600.5, accuracy: 0.0001)
         XCTAssertEqual(snapshot.usedPercent, 600.5 / 7_000 * 100, accuracy: 0.001)
 
@@ -263,6 +283,13 @@ final class RequestTests: XCTestCase {
         let refused = await client.fetch()
         XCTAssertEqual(refused, .failure(.expired(Provider.copilot.expiredHint)), "No token pasted: the login's error stands")
 
+        CopilotCredentials.invalidate()
+        stub { request in
+            request.url?.path == "/copilot_internal/user" ? (404, Data()) : (200, usage)
+        }
+        let notFound = await client.fetch()
+        XCTAssertEqual(notFound, .failure(.unreachable), "No token pasted: a 404 stays what it was")
+
         try keys.save("placeholder-pasted", for: .copilot, region: "Pro")
         CopilotCredentials.invalidate()
         stub { request in
@@ -289,6 +316,23 @@ final class RequestTests: XCTestCase {
         XCTAssertEqual(outage, .failure(.unreachable), "An outage isn't a refused login")
         XCTAssertEqual(StubURLProtocol.requests.count, 1)
 
+        // The private endpoint turning the login down: no Copilot on it, or the endpoint moved.
+        for status in [400, 404, 422] {
+            CopilotCredentials.invalidate()
+            stub { request in
+                switch request.url?.path {
+                case "/copilot_internal/user":
+                    return (status, Data())
+                case "/user":
+                    return (200, user)
+                default:
+                    return (200, usage)
+                }
+            }
+            let turnedDown = try await client.fetch().get()
+            XCTAssertEqual(turnedDown.source, "copilot-token", "\(status) lets the token answer")
+        }
+
         setenv("XDG_CONFIG_HOME", empty.path, 1)
         CopilotCredentials.invalidate()
         stub { request in
@@ -314,7 +358,7 @@ final class RequestTests: XCTestCase {
             _ = try await APIKeyClient.copilotSnapshot(key: "placeholder", planName: nil, now: now)
             XCTFail("401 should fail")
         } catch {
-            XCTAssertEqual(error as? ProviderError, .expired(Provider.copilot.expiredHint))
+            XCTAssertEqual(error as? ProviderError, .expired(CopilotBilling.tokenExpiredHint), "About the token, not gh, which the iPhone doesn't have")
         }
     }
 }

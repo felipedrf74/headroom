@@ -59,11 +59,16 @@ struct RootView: View {
             if let id = UserDefaults.standard.string(forKey: "TokenroomFollow") {
                 let provider = store.reading(id: id)?.provider
                 let window = provider.flatMap { LiveActivities.candidate(in: $0) }
-                do {
-                    let started = try provider.flatMap { provider in try window.map { try LiveActivities.start(provider, window: $0) } }
-                    NSLog("%@", "TokenroomFollow \(id): enabled=\(LiveActivities.isEnabled) window=\(window?.id ?? "none") started=\(String(describing: started))")
-                } catch {
-                    NSLog("%@", "TokenroomFollow \(id): \(error)")
+                Task {
+                    do {
+                        var started: Bool?
+                        if let provider, let window {
+                            started = try await LiveActivities.start(provider, window: window)
+                        }
+                        NSLog("%@", "TokenroomFollow \(id): enabled=\(LiveActivities.isEnabled) window=\(window?.id ?? "none") started=\(String(describing: started))")
+                    } catch {
+                        NSLog("%@", "TokenroomFollow \(id): \(error)")
+                    }
                 }
             }
             #endif

@@ -40,9 +40,9 @@ struct APIKeyStore: Sendable {
             return key
         }
         #if os(macOS)
-        if usesDataProtection, let legacy = readKey(legacyQuery(provider)) {
-            migrate(provider, key: legacy)
-            return legacy
+        if usesDataProtection, let legacy = readItem(legacyQuery(provider)) {
+            migrate(provider, key: legacy.key, saved: legacy.metadata)
+            return legacy.key
         }
         #endif
         return nil
@@ -92,14 +92,36 @@ struct APIKeyStore: Sendable {
         return query
     }
 
-    /// Moves a login-keychain key into the data-protection keychain, keeping its metadata.
-    private func migrate(_ provider: Provider, key: String) {
-        let metadata = readMetadata(legacyQuery(provider))
-        do {
-            try save(key, for: provider, region: metadata?.region, warning: metadata?.warning, now: metadata?.addedAt ?? .now)
-            SecItemDelete(legacyQuery(provider) as CFDictionary)
-        } catch {
-            // Still readable where it was; try again next time.
+    /// The key and its metadata in one read, so both come from the same item even while another
+    /// read is moving it.
+    private func readItem(_ base: [String: Any]) -> (key: String, metadata: Metadata?)? {
+        var query = base
+        query[kSecReturnData as String] = true
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let attributes = item as? [String: Any],
+              let data = attributes[kSecValueData as String] as? Data,
+              let key = String(data: data, encoding: .utf8), !key.isEmpty
+        else { return nil }
+        let metadata = (attributes[kSecAttrGeneric as String] as? Data).flatMap { try? JSONDecoder().decode(Metadata.self, from: $0) }
+        return (key, metadata)
+    }
+
+    /// Moves a login-keychain key into the data-protection keychain, keeping its metadata. A
+    /// delete with the login-keychain query can match the data-protection copy too (a key saved
+    /// and then deleted that way reads back as nothing), so the old item goes first and the new
+    /// one is added last; if it can't be, the old one comes back. A read racing this one ends
+    /// with an add too, so the key is never left in neither keychain.
+    private func migrate(_ provider: Provider, key: String, saved: Metadata?) {
+        let metadata = Metadata(last4: String(key.suffix(4)), addedAt: saved?.addedAt ?? .now, region: saved?.region, warning: saved?.warning)
+        SecItemDelete(legacyQuery(provider) as CFDictionary)
+        let status = (try? add(key, metadata: metadata, to: baseQuery(provider), for: provider)) ?? errSecParam
+        guard status == errSecSuccess || status == errSecDuplicateItem else {
+            // Back where it was; moved on a later read.
+            _ = try? add(key, metadata: metadata, to: legacyQuery(provider), for: provider)
+            return
         }
     }
     #endif
@@ -112,18 +134,28 @@ struct APIKeyStore: Sendable {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw KeyError.empty }
         let metadata = Metadata(last4: String(trimmed.suffix(4)), addedAt: now, region: region, warning: warning)
+        #if os(macOS)
+        if usesDataProtection {
+            // A key replaced before it moved over would otherwise stay in the login keychain.
+            // Before the add: this query also matches the data-protection copy.
+            SecItemDelete(legacyQuery(provider) as CFDictionary)
+        }
+        #endif
         SecItemDelete(baseQuery(provider) as CFDictionary)
+        let status = try add(trimmed, metadata: metadata, to: baseQuery(provider), for: provider)
+        guard status == errSecSuccess else { throw KeyError.keychain(status) }
+    }
 
-        var attributes = baseQuery(provider)
-        attributes[kSecValueData as String] = Data(trimmed.utf8)
+    private func add(_ key: String, metadata: Metadata, to query: [String: Any], for provider: Provider) throws -> OSStatus {
+        var attributes = query
+        attributes[kSecValueData as String] = Data(key.utf8)
         attributes[kSecAttrGeneric as String] = try JSONEncoder().encode(metadata)
         attributes[kSecAttrLabel as String] = "Tokenroom · \(provider.displayName) key"
         #if !os(macOS)
         // Readable by widgets and background refresh once the phone has been unlocked; stays on this device.
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         #endif
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeyError.keychain(status) }
+        return SecItemAdd(attributes as CFDictionary, nil)
     }
 
     func remove(for provider: Provider) throws {
@@ -152,6 +184,17 @@ struct APIKeyStore: Sendable {
         }
         #endif
         return query
+    }
+}
+
+extension KeySpec {
+    /// The choice a key form starts on: the one saved with the current key (its Copilot plan or
+    /// Moonshot region), else the first, so replacing a key doesn't quietly change it.
+    func initialChoice(saved: APIKeyStore.Metadata?) -> String {
+        if let region = saved?.region, regions.contains(region) {
+            return region
+        }
+        return regions.first ?? ""
     }
 }
 

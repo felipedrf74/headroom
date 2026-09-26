@@ -45,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
         }
+        // Tokenroom 2.0.0 kept full copies of ~/.claude/settings.json (keys in env included) for
+        // the Claude bridge; they go whether Claude or the bridge is on or not.
+        Task { await BlockingIO.run { ClaudeStatusLineBridge.standard.removeFullBackups() } }
         store.start()
         statusItem = StatusItemController(store: store, onSettings: { [weak self] in
             self?.openSettings()

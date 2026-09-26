@@ -1,8 +1,8 @@
 // Versions. The Mac collector is versioned on its own.
 // scripts/build.sh reads these for the swiftc fallback.
-TOKENROOM_MAC_VERSION = 2.0.0
-TOKENROOM_MAC_BUILD = 1
+TOKENROOM_MAC_VERSION = 2.0.1
+TOKENROOM_MAC_BUILD = 2
 
 // iPhone app, widgets, and Watch app share one version.
 TOKENROOM_MOBILE_VERSION = 1.0.0
-TOKENROOM_MOBILE_BUILD = 1
+TOKENROOM_MOBILE_BUILD = 2

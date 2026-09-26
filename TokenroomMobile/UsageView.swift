@@ -9,6 +9,9 @@ struct UsageView: View {
     var openAlerts: () -> Void = {}
     @State private var showsDisconnected = false
     @State private var notificationsOff = false
+    /// Why following a row's window failed, from its swipe action or menu.
+    @State private var followError: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -58,13 +61,15 @@ struct UsageView: View {
                             .swipeActions(edge: .leading) {
                                 if let window = LiveActivities.candidate(in: reading.provider) {
                                     Button("Follow", systemImage: "timer") {
-                                        _ = try? LiveActivities.start(reading.provider, window: window)
+                                        follow(reading.provider, window: window)
                                     }
                                     .tint(.orange)
                                 }
                             }
                             .contextMenu {
-                                FollowButton(provider: reading.provider)
+                                FollowButton(provider: reading.provider) { error in
+                                    if let error { followError = error }
+                                }
                                 Button("Details", systemImage: "info.circle") { path = [reading.id] }
                             }
                         }
@@ -102,6 +107,31 @@ struct UsageView: View {
             }
             .task {
                 await checkNotifications()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Back from Settings, where notifications may have been turned on.
+                if phase == .active {
+                    Task { await checkNotifications() }
+                }
+            }
+            .alert("Couldn't follow it", isPresented: Binding(get: { followError != nil }, set: { if !$0 { followError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(followError ?? "")
+            }
+        }
+    }
+
+    private func follow(_ provider: RelayProvider, window: RelayWindow) {
+        guard LiveActivities.isEnabled else {
+            followError = "Live Activities are off for Tokenroom. Turn them on in Settings › Tokenroom."
+            return
+        }
+        Task {
+            do {
+                try await LiveActivities.start(provider, window: window)
+            } catch {
+                followError = "Couldn't start the Live Activity."
             }
         }
     }
@@ -212,7 +242,8 @@ private struct UsageHeroCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            FollowButton(provider: provider) { followError = $0 }
+            // The window shown here, when it resets within 8 hours; else a session.
+            FollowButton(provider: provider, preferring: window?.id) { followError = $0 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             if let followError {
@@ -276,7 +307,10 @@ struct ReadingRow: View {
                     if window.isMetered, let week = reading.history[window.id], !week.isEmpty {
                         Sparkline(history: week, tint: Color(hex: provider.tint), lineWidth: 1.2)
                             .frame(width: 64, height: 18)
+                            // The line itself is hidden from VoiceOver; this element says what it shows.
+                            .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Last 7 days")
+                            .accessibilityValue(Sparkline.summary(week))
                     }
                 }
             }
@@ -285,7 +319,7 @@ struct ReadingRow: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(PaceStyle.color(pace.severity))
             }
-            if let window, let forecast = Forecast.text(for: window, history: reading.history[window.id]) {
+            if let window, let forecast = Forecast.text(for: window, history: reading.history[window.id], checkedAt: provider.checkedAt ?? provider.fetchedAt) {
                 Text(forecast)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -409,7 +443,7 @@ struct UsageEmptyState: View {
         case .ready where store.needsNewerApp:
             ("Update Tokenroom", "arrow.down.app", "Your Mac sends readings this version can't read yet.")
         default:
-            ("No readings yet", "laptopcomputer.and.iphone", "On your Mac, open Tokenroom Settings and turn on iPhone & Apple Watch. Or add an API key to read providers here.")
+            ("No readings yet", "laptopcomputer.and.iphone", "Open Tokenroom on your Mac, signed in to the same iCloud account: it sends its readings here. Or add an API key to read providers on this iPhone.")
         }
     }
 }

@@ -101,6 +101,7 @@ spctl --assess --type execute --verbose=2 "$APP"
 rm -f "$OUT/notarize.zip"
 
 ditto -c -k --keepParent "$APP" "$ZIP"
-shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+# Named without the folder, so `shasum -c` works next to the download and no local path leaks.
+(cd "$OUT" && shasum -a 256 "${ZIP:t}") | tee "$ZIP.sha256"
 echo "Ready: $ZIP"
 echo "Draft a GitHub release with: gh release create v$VERSION \"$ZIP\" --draft --title \"Tokenroom $VERSION\""

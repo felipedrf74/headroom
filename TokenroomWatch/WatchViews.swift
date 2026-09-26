@@ -35,6 +35,15 @@ struct WatchRootView: View {
                 }
             }
         }
+        .onOpenURL { url in
+            // Complications and the Smart Stack link to a provider; the rest open the list.
+            if case .provider(let id) = DeepLink(url) {
+                store.openedProvider = id
+            } else {
+                store.openedProvider = nil
+                path = []
+            }
+        }
         // Opened from a complication or the Smart Stack; if the readings aren't in yet, once they are.
         .onChange(of: store.openedProvider, initial: true) { _, _ in openRequestedProvider() }
         .onChange(of: store.items.map(\.id)) { _, _ in openRequestedProvider() }

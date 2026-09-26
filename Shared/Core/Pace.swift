@@ -82,7 +82,8 @@ struct Pace: Equatable, Sendable {
         var runsOut: Date?
         if let measured {
             // Measured by a collector with frequent readings (the Mac): better than hourly buckets.
-            runsOut = measured.runsOutAt.flatMap { $0 > now && $0 < resetsAt ? $0 : nil }
+            // A run-out time that has passed since means it has run out by now, not that it won't.
+            runsOut = measured.runsOutAt.flatMap { $0 < resetsAt ? max($0, now) : nil }
         } else if let rate = recentRate(samples: samples, since: start, kind: kind, now: now) ?? linearRate(used: used, elapsed: elapsed),
            rate > 0 {
             let projected = now.addingTimeInterval((100 - used) / rate)

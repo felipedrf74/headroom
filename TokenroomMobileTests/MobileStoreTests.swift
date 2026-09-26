@@ -17,11 +17,14 @@ final class MobileStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    /// A throwaway stand-in for the App Group's defaults.
+    /// A throwaway stand-in for the App Group's defaults, named by the class and a count so runs
+    /// reuse a few preferences files instead of leaving one behind per test.
     private func makeDefaults() -> UserDefaults {
-        let name = "tokenroom.tests.\(UUID().uuidString)"
+        let name = "tokenroom.tests.\(Self.self).\(suites.count)"
         suites.append(name)
-        return UserDefaults(suiteName: name)!
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
     }
 
     private func makeFolder() throws -> URL {
@@ -65,6 +68,27 @@ final class MobileStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testALaunchThatCantReadICloudKeepsTheOtherDevicesReadings() async throws {
+        let defaults = makeDefaults()
+        let folder = try makeFolder()
+        let fromMac = RelayProvider(
+            id: "claude", name: "Claude", shortName: "Claude", monogram: "C", tint: "#D97757", state: "live",
+            checkedAt: now, fetchedAt: now, primaryWindowID: "weekly",
+            windows: [RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 42, resetsAt: now.addingTimeInterval(86_400))]
+        )
+        let cacheURL = folder.appendingPathComponent(ReadingCache.fileName)
+        try ReadingCache(savedAt: now, isSample: false, items: [ReadingCache.Item(provider: fromMac, source: "Mac")]).save(to: cacheURL)
+
+        // No iCloud in this store, like a launch that's offline.
+        let store = makeStore(defaults: defaults, folder: folder)
+        await store.refresh(force: true, now: now.addingTimeInterval(60))
+        XCTAssertEqual(store.readings.map(\.id), ["claude"], "The Mac's reading stays until iCloud answers")
+        XCTAssertEqual(store.readings.first?.source, "Mac")
+        let saved = try XCTUnwrap(ReadingCache.load(from: cacheURL))
+        XCTAssertEqual(saved.items.map(\.id), ["claude"], "Widgets and the Watch keep it too")
+    }
+
+    @MainActor
     func testLeavingSampleModeWithNothingConnectedShowsNothing() async throws {
         let defaults = makeDefaults()
         defaults.set(true, forKey: MobileStore.Keys.sampleMode)
@@ -100,6 +124,48 @@ final class MobileStoreTests: XCTestCase {
         XCTAssertNotNil(store.alertPreferences.updatedAt, "Stamped, so the newer copy wins against a Mac's")
         XCTAssertFalse(defaults.bool(forKey: MobileStore.Keys.alertPreferencesShared), "Waiting to reach iCloud")
         XCTAssertEqual(makeStore(defaults: defaults, folder: folder).alertPreferences, store.alertPreferences)
+    }
+
+    @MainActor
+    func testQuietHoursFollowThisIPhoneOnlyWhenItsZoneChanges() async throws {
+        let defaults = makeDefaults()
+        let folder = try makeFolder()
+        var elsewhere = AlertPreferences()
+        elsewhere.timeZoneID = TimeZone.current.identifier == "Pacific/Auckland" ? "Europe/Madrid" : "Pacific/Auckland"
+        defaults.set(try JSONEncoder().encode(elsewhere), forKey: MobileStore.Keys.alertPreferences)
+
+        let store = makeStore(defaults: defaults, folder: folder)
+        await store.refresh(force: true)
+        XCTAssertEqual(store.alertPreferences.timeZoneID, TimeZone.current.identifier, "The shared choices take this iPhone's zone")
+        XCTAssertNil(store.alertPreferences.updatedAt, "Not a change of choices")
+
+        // Another iPhone in its own zone set it since; this one hasn't moved.
+        defaults.set(try JSONEncoder().encode(elsewhere), forKey: MobileStore.Keys.alertPreferences)
+        let again = makeStore(defaults: defaults, folder: folder)
+        await again.refresh(force: true)
+        XCTAssertEqual(again.alertPreferences.timeZoneID, elsewhere.timeZoneID, "Two iPhones don't take turns rewriting it")
+    }
+
+    /// Anthropic's report is 15 minutes apart: a budget changed before the next call shows on
+    /// the saved reading at once.
+    @MainActor
+    func testABudgetShowsOnASavedReadingAtOnce() throws {
+        let defaults = makeDefaults()
+        let folder = try makeFolder()
+        let checked = Date()
+        let balance = QuotaWindow(id: "balance-cny", kind: .pool, title: "Balance", usedPercent: 0, resetsAt: nil, amount: QuotaAmount(remaining: 12.4, unit: "cny"), metered: false)
+        let snapshot = QuotaSnapshot(provider: .deepseek, usedPercent: 0, resetsAt: nil, fetchedAt: checked, primaryTitle: "Balance", windows: [balance])
+        let saved = RelayProvider(provider: .deepseek, status: .live(snapshot.applyingBudget(50)), checkedAt: checked)
+        try ReadingCache(savedAt: checked, isSample: false, items: [ReadingCache.Item(provider: saved, source: MobileStore.localLabel)])
+            .save(to: folder.appendingPathComponent(ReadingCache.fileName))
+        defaults.set([Provider.deepseek.rawValue], forKey: MobileStore.Keys.keyedProviders)
+
+        let store = makeStore(defaults: defaults, folder: folder)
+        XCTAssertEqual(store.budgetCurrency(for: .deepseek), "CNY", "From the saved reading, before this launch reads it")
+        store.setBudget(100, for: .deepseek)
+        let window = try XCTUnwrap(store.reading(id: Provider.deepseek.rawValue)?.provider.windows.first)
+        XCTAssertEqual(window.used, 87.6, accuracy: 0.001, "12.40 left of 100")
+        XCTAssertEqual(window.amount?.limit, 100)
     }
 
     // MARK: Shared with the widgets

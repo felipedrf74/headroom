@@ -98,6 +98,32 @@ final class OrgSpendTests: XCTestCase {
         XCTAssertNil(ReadingText.amountHeadline(QuotaAmount(unit: "usd")))
     }
 
+    /// A saved reading standing in for a provider not read yet (Anthropic's report is 15 minutes
+    /// apart) shows a budget changed meanwhile, without a call.
+    func testASavedReadingTakesANewBudget() throws {
+        let balance = try DeepSeekParser.snapshot(from: fixture("deepseek-balance"))
+        let saved = RelayProvider(provider: .deepseek, status: .live(balance.applyingBudget(50)), checkedAt: now)
+        let rebudgeted = saved.applyingBudget(100)
+        XCTAssertEqual(rebudgeted.windows[0].used, 87.6, accuracy: 0.001, "$12.40 left of $100")
+        XCTAssertEqual(rebudgeted.windows[0].amount?.limit, 100)
+        XCTAssertEqual(rebudgeted, RelayProvider(provider: .deepseek, status: .live(balance.applyingBudget(100)), checkedAt: now), "As if read with it")
+        XCTAssertEqual(saved.applyingBudget(50), saved, "The same budget changes nothing")
+
+        let cleared = saved.applyingBudget(nil).windows[0]
+        XCTAssertFalse(cleared.isMetered, "No reference: the balance again")
+        XCTAssertEqual(cleared.amount?.remaining, 12.4)
+        XCTAssertNil(cleared.amount?.limit)
+
+        let spend = OrgSpend.snapshot(.anthropicOrg, window: OrgSpend.spendWindow(250, now: now), fetchedAt: now)
+        let savedSpend = RelayProvider(provider: .anthropicOrg, status: .live(spend.applyingBudget(1000)), checkedAt: now)
+        XCTAssertEqual(savedSpend.applyingBudget(500).windows[0].used, 50, accuracy: 0.001)
+        XCTAssertEqual(savedSpend.applyingBudget(500).windows[0].amount?.used, 250, "Spend keeps what was spent")
+
+        let limited = try OpenRouterParser.snapshot(from: fixture("openrouter-limited"), fetchedAt: now)
+        let own = RelayProvider(provider: .openrouter, status: .live(limited), checkedAt: now)
+        XCTAssertEqual(own.applyingBudget(10), own, "A provider's own limit stays")
+    }
+
     func testBudgetLeavesMeteredWindowsAndMissingBudgetsAlone() throws {
         let metered = try OpenRouterParser.snapshot(from: fixture("openrouter-limited"), fetchedAt: now)
         XCTAssertEqual(metered.applyingBudget(10), metered)
@@ -108,9 +134,11 @@ final class OrgSpendTests: XCTestCase {
 
     @MainActor
     func testChangingABudgetUpdatesTheReadingAtOnce() async throws {
-        let suite = "tokenroom.tests.\(UUID().uuidString)"
+        // A fixed name: macOS keeps an empty preferences file for every name used.
+        let suite = "tokenroom.tests.\(Self.self)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defaults.set(["openaiOrg"], forKey: "enabledProviders")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }

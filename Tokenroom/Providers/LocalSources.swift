@@ -7,18 +7,37 @@ enum LocalSources {
     // MARK: VS Code-style state databases (Cursor, Devin/Windsurf)
 
     /// A value from a VS Code-style `state.vscdb` (`ItemTable`), read-only. Falls back to a
-    /// temporary copy when the live database refuses a read-only open.
-    static func vscodeState(_ key: String, database: URL) -> String? {
+    /// temporary copy only when the live database can't be read in place (a refused read-only
+    /// open, a lock); a missing row is just signed out, and nothing is copied.
+    static func vscodeState(_ key: String, database: URL, copy: (URL) -> URL? = copyDatabase) -> String? {
         guard FileManager.default.fileExists(atPath: database.path) else { return nil }
-        if let value = sqliteValue(key, path: database.path) {
+        switch sqliteRead(key, path: database.path) {
+        case .value(let value):
             return value
+        case .missing:
+            return nil
+        case .unreadable:
+            guard let copied = copy(database) else { return nil }
+            defer { try? FileManager.default.removeItem(at: copied.deletingLastPathComponent()) }
+            return sqliteValue(key, path: copied.path)
         }
-        guard let copy = copyDatabase(database) else { return nil }
-        defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
-        return sqliteValue(key, path: copy.path)
+    }
+
+    /// What reading one key found.
+    enum SQLiteRead: Equatable {
+        case value(String)
+        /// The database answered: no row, or an empty value.
+        case missing
+        /// It couldn't be opened or queried.
+        case unreadable
     }
 
     static func sqliteValue(_ key: String, path: String) -> String? {
+        guard case .value(let value) = sqliteRead(key, path: path) else { return nil }
+        return value
+    }
+
+    static func sqliteRead(_ key: String, path: String) -> SQLiteRead {
         var database: OpaquePointer?
         let encoded = path.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "?"))) ?? path
         if sqlite3_open_v2("file://\(encoded)?mode=ro", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nil) != SQLITE_OK {
@@ -26,23 +45,30 @@ enum LocalSources {
             database = nil
             if sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
                 if let database { sqlite3_close(database) }
-                return nil
+                return .unreadable
             }
         }
-        guard let database else { return nil }
+        guard let database else { return .unreadable }
         defer { sqlite3_close(database) }
         sqlite3_busy_timeout(database, 1_500)
         _ = sqlite3_exec(database, "PRAGMA query_only = ON", nil, nil, nil)
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, "SELECT value FROM ItemTable WHERE key = ? LIMIT 1", -1, &statement, nil) == SQLITE_OK,
               let statement
-        else { return nil }
+        else { return .unreadable }
         defer { sqlite3_finalize(statement) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         sqlite3_bind_text(statement, 1, key, -1, transient)
-        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_text(statement, 0) else { return nil }
-        let value = String(cString: bytes)
-        return value.isEmpty ? nil : value
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            guard let bytes = sqlite3_column_text(statement, 0) else { return .missing }
+            let value = String(cString: bytes)
+            return value.isEmpty ? .missing : .value(value)
+        case SQLITE_DONE:
+            return .missing
+        default:
+            return .unreadable
+        }
     }
 
     private static func copyDatabase(_ source: URL) -> URL? {
@@ -108,11 +134,12 @@ enum LocalSources {
 
     // MARK: CLI JSON (Antigravity's agy)
 
-    /// `major.minor.patch` from `--version` output, e.g. "agy 1.1.12 (abc)" → [1, 1, 12]. Numbers
-    /// shaped like a date ("2026.09.25", a build stamp) aren't taken for the version.
+    /// `major.minor.patch` from `--version` output, e.g. "agy 1.1.12 (abc)" → [1, 1, 12], with any
+    /// further parts ("1.1.12.3") and a sentence's closing period allowed. Numbers shaped like a
+    /// date ("2026.09.25", a build stamp) aren't taken for the version.
     static func semanticVersion(in text: String) -> [Int]? {
         var rest = text[...]
-        while let range = rest.range(of: #"(?<![\d.])\d+\.\d+(\.\d+)?(?![\d.])"#, options: .regularExpression) {
+        while let range = rest.range(of: #"(?<![\d.])\d+(\.\d+)+(?!\.?\d)"#, options: .regularExpression) {
             let parts = rest[range].split(separator: ".").compactMap { Int($0) }
             if let major = parts.first, major < 1000 {
                 return parts

@@ -8,6 +8,12 @@
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array/>
+	<!--
+	The reasons below cover Tokenroom's own files and defaults. It also reads the modification
+	dates of other tools' login files (to notice a new sign-in) and, once, Headroom's defaults (to
+	bring its settings over); no approved reason describes those. This copy is distributed with
+	Developer ID, not through the App Store, and PRIVACY.md describes both.
+	-->
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>

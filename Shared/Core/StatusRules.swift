@@ -27,8 +27,12 @@ extension ProviderStatus {
     /// Honors Retry-After, within one minute to six hours.
     static func clampedRetry(_ until: Date?, now: Date) -> Date {
         let wait = until.map { $0.timeIntervalSince(now) } ?? TokenroomHTTP.defaultRetryAfter
-        return now.addingTimeInterval(min(max(wait, 60), 6 * 60 * 60))
+        return now.addingTimeInterval(min(max(wait, 60), longestRetry))
     }
+
+    /// The longest Retry-After honored. A wait further off than this means the clock was set
+    /// back since it was saved.
+    static let longestRetry: TimeInterval = 6 * 60 * 60
 
     /// Not connected: nothing to show until the user signs in or adds a key.
     var isDisconnected: Bool {
@@ -88,12 +92,16 @@ extension RelayProvider {
     /// Live Activities last about 8 hours, so only windows resetting within that are followed.
     static let followHorizon: TimeInterval = 8 * 3600
 
-    /// The window worth a Live Activity: a session, else the most used window at 80% or more,
-    /// resetting within 8 hours.
-    func windowToFollow(now: Date = .now) -> RelayWindow? {
+    /// The window worth a Live Activity: the one on screen when it qualifies, else a session,
+    /// else the most used window at 80% or more, resetting within 8 hours.
+    /// - Parameter preferred: the window a screen shows, e.g. Next up's.
+    func windowToFollow(preferring preferred: String? = nil, now: Date = .now) -> RelayWindow? {
         let soon = windows.filter { window in
             guard window.isMetered, let resetsAt = window.resetsAt else { return false }
             return resetsAt > now && resetsAt.timeIntervalSince(now) <= Self.followHorizon
+        }
+        if let preferred, let shown = soon.first(where: { $0.id == preferred }) {
+            return shown
         }
         return soon.first { $0.windowKind == .session }
             ?? soon.filter { $0.used >= 80 }.max { $0.used < $1.used }

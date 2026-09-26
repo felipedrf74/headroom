@@ -115,6 +115,21 @@ struct AnnouncementRow: View {
     }
 }
 
+/// A News section's footer: where its items come from, after any feed that couldn't be read.
+struct NewsFooter: View {
+    var text: String
+    var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let problem {
+                Text(problem)
+            }
+            Text(text)
+        }
+    }
+}
+
 /// Marks an item published since News was last opened.
 struct NewBadge: View {
     var body: some View {

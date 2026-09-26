@@ -24,6 +24,8 @@ actor CloudRelay {
     static let alertPreferencesRecord = "prefs-alerts"
     /// Alert records older than this are deleted; the notification went out long ago.
     static let eventLifetime: TimeInterval = 14 * 86_400
+    /// The most records CloudKit takes in one request.
+    static let batchLimit = 400
 
     enum Field {
         /// A plain field, not `encryptedValues`: it holds usage numbers, names, and reset times
@@ -149,6 +151,24 @@ actor CloudRelay {
         try await contents().sources
     }
 
+    /// Whether a balance alert already went out, less than a day ago, under the name of the day
+    /// before or after. Balances have no reset, so an alert is named by the day (UTC) a device saw
+    /// it, and two devices on either side of midnight would otherwise alert twice for one crossing,
+    /// whichever of them delivers first.
+    func wentOutOnANeighbouringDay(_ alert: UsageAlert, now: Date = .now) async throws -> Bool {
+        for name in AlertRules.neighbouringDayIDs(of: alert) {
+            do {
+                let record = try await database.record(for: CKRecord.ID(recordName: name, zoneID: Self.zoneID))
+                if (record.creationDate ?? .distantPast) > now.addingTimeInterval(-86_400) {
+                    return true
+                }
+            } catch let error as CKError where error.code == .unknownItem || error.code == .zoneNotFound {
+                continue
+            }
+        }
+        return false
+    }
+
     private static func source(from record: CKRecord) -> Source {
         var envelope: RelayEnvelope?
         var needsNewerApp = false
@@ -197,10 +217,17 @@ extension CloudRelay {
         try await save([record])
     }
 
-    /// Saves an alert. Saving an ID that already exists updates it without a second notification,
-    /// because the iPhone's subscription fires only when a record is created.
+    /// Saves an alert, unless a device already has: the subscription fires only when a record is
+    /// created, so one already there means its notification went out. Left as it is, an iPhone's
+    /// claim keeps its `shown:` key, which tells another iPhone that nothing reached it.
     func saveAlert(_ alert: UsageAlert) async throws {
-        try await saveEvent(id: alert.id, provider: alert.provider, level: alert.level, title: alert.title, body: alert.body, resetsAt: alert.resetsAt, kind: alert.kind.rawValue, key: alert.key)
+        let record = Self.eventRecord(id: alert.id, provider: alert.provider, level: alert.level, title: alert.title, body: alert.body,
+                                      resetsAt: alert.resetsAt, kind: alert.kind.rawValue, key: alert.key)
+        do {
+            try await save([record], policy: .ifServerRecordUnchanged)
+        } catch let error as CKError where error.code == .serverRecordChanged {
+            // Already sent, by another device.
+        }
     }
 
     func publishAlertPreferences(_ preferences: AlertPreferences) async throws {
@@ -209,12 +236,28 @@ extension CloudRelay {
         try await save([record])
     }
 
+    /// Deletes in batches CloudKit accepts (at most 400 changes a request). Not atomic: a record
+    /// another device already deleted doesn't stop the rest.
     func deleteRecords(named names: [String]) async throws {
-        guard !names.isEmpty else { return }
-        _ = try await database.modifyRecords(
-            saving: [],
-            deleting: names.map { CKRecord.ID(recordName: $0, zoneID: Self.zoneID) }
-        )
+        for start in stride(from: 0, to: names.count, by: Self.batchLimit) {
+            let batch = names[start..<min(start + Self.batchLimit, names.count)]
+            _ = try await database.modifyRecords(
+                saving: [],
+                deleting: batch.map { CKRecord.ID(recordName: $0, zoneID: Self.zoneID) },
+                savePolicy: .changedKeys,
+                atomically: false
+            )
+        }
+    }
+
+    /// Deletes alert records older than `eventLifetime`, whichever device made them. Their
+    /// notifications went out long ago; the Mac and the iPhone both do this, so it happens
+    /// without the other.
+    func pruneEvents(now: Date = .now) async throws {
+        let old = try await contents().events.filter { event in
+            event.createdAt.map { now.timeIntervalSince($0) > Self.eventLifetime } ?? false
+        }
+        try await deleteRecords(named: old.map(\.id))
     }
 
     /// Record names are deterministic, so two Macs seeing the same crossing create one alert.
@@ -245,8 +288,25 @@ extension CloudRelay {
         return record
     }
 
+    /// Deletes the zone with every record in it. CloudKit reports a failed deletion in the
+    /// zone's own result rather than by throwing, so that's checked too.
     func deleteAllData() async throws {
-        _ = try await database.modifyRecordZones(saving: [], deleting: [Self.zoneID])
+        let results = try await database.modifyRecordZones(saving: [], deleting: [Self.zoneID])
+        zoneReady = false
+        for (_, result) in results.deleteResults {
+            guard case .failure(let error) = result else { continue }
+            // Already gone, from this device or from iCloud settings: nothing left to delete.
+            let code = (error as? CKError)?.code
+            if code != .zoneNotFound, code != .userDeletedZone {
+                throw error
+            }
+        }
+    }
+
+    /// Makes the next save create the zone again. For after the user deleted Tokenroom's iCloud
+    /// data in Settings: CloudKit then refuses saves until the zone is re-created, which should
+    /// only happen when the user asks (turning sync back on).
+    func resetZone() {
         zoneReady = false
     }
 
@@ -322,18 +382,28 @@ extension CloudRelay {
         }
     }
 
+    enum Claim: Equatable {
+        /// This iPhone's record now stands for the alert.
+        case created
+        /// A Mac's record was there first, and its notification reached this iPhone.
+        case pushed
+        /// Another iPhone's record was there first. It showed the alert itself, and no
+        /// subscription lists its key, so nothing reached this iPhone.
+        case shownElsewhere
+    }
+
     /// Before this iPhone shows an alert itself: creates the alert's record, under `shownKey`,
-    /// only if no device has yet. False when another device's record is already there, meaning
-    /// its notification reached this iPhone. A Mac that sees the same crossing later saves over
-    /// this record, and an update sends no notification, so the alert shows once.
-    func claimAlert(_ alert: UsageAlert) async throws -> Bool {
+    /// only if no device has yet. A Mac that sees the same crossing later saves over this record,
+    /// and an update sends no notification, so the alert shows once.
+    func claimAlert(_ alert: UsageAlert) async throws -> Claim {
         let record = Self.eventRecord(id: alert.id, provider: alert.provider, level: alert.level, title: alert.title, body: alert.body,
                                       resetsAt: alert.resetsAt, kind: alert.kind.rawValue, key: alert.shownKey)
         do {
             try await save([record], policy: .ifServerRecordUnchanged)
-            return true
+            return .created
         } catch let error as CKError where error.code == .serverRecordChanged {
-            return false
+            let key = error.serverRecord?[Field.alertKey] as? String
+            return key?.hasPrefix("shown:") == true ? .shownElsewhere : .pushed
         }
     }
 
@@ -352,7 +422,8 @@ extension CloudRelay {
         visible.alertLocalizationKey = "%1$@"
         visible.alertLocalizationArgs = [Field.body]
         visible.soundName = "default"
-        visible.collapseIDKey = Field.provider
+        // No `collapseIDKey`: CloudKit sends its value as is, as every push's collapse ID, so
+        // unseen alerts would replace each other across providers.
         alerts.notificationInfo = visible
         return alerts
     }

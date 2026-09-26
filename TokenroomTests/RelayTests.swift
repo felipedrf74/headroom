@@ -75,9 +75,11 @@ final class RelayTests: XCTestCase {
 
     @MainActor
     func testStoreEnvelopeHasEnabledProvidersAndNoIdentity() throws {
-        let suite = "tokenroom.tests.\(UUID().uuidString)"
+        // A fixed name: macOS keeps an empty preferences file for every name used.
+        let suite = "tokenroom.tests.\(Self.self)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defaults.set(["claude", "grokBot"], forKey: "enabledProviders")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }

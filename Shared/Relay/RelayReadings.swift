@@ -40,23 +40,36 @@ enum RelayReadings {
 
     /// The cache, or a fresh read when it's older than `maxAge`, within `budget` seconds.
     static func cache(at url: URL?, maxAge: TimeInterval, budget: TimeInterval, now: Date = .now) async -> ReadingCache? {
+        await cache(at: url, maxAge: maxAge, budget: budget, now: now) { await fetch(now: now) }
+    }
+
+    /// - Parameter read: iCloud's readings; tests stand in for it.
+    static func cache(
+        at url: URL?, maxAge: TimeInterval, budget: TimeInterval, now: Date,
+        read: @escaping @Sendable () async -> ReadingCache?
+    ) async -> ReadingCache? {
         let cached = url.flatMap(ReadingCache.load)
-        if let cached, cached.isSample || now.timeIntervalSince(cached.savedAt) < maxAge {
+        if let cached, isRecent(cached, maxAge: maxAge, now: now) {
             return cached
         }
-        let fresh = await withTaskGroup(of: ReadingCache?.self) { group in
-            group.addTask { await fetch(now: now) }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
+        let fresh = await TimeLimit.run(budget, otherwise: nil, read)
         if let fresh, let url {
             try? fresh.save(to: url)
         }
         return fresh ?? cached
+    }
+
+    #if DEBUG
+    /// Screenshots: a sample cache saved on the Watch stays until real readings replace it. The
+    /// iPhone doesn't hand samples over any more; release builds let an old one age out.
+    static let keepsSamples = true
+    #else
+    static let keepsSamples = false
+    #endif
+
+    /// Whether `cached` can be shown without reading iCloud first. Outside debug builds a sample
+    /// cache ages like any other, so it doesn't outlive sample mode.
+    static func isRecent(_ cached: ReadingCache, maxAge: TimeInterval, now: Date, keepsSamples: Bool = RelayReadings.keepsSamples) -> Bool {
+        (keepsSamples && cached.isSample) || now.timeIntervalSince(cached.savedAt) < maxAge
     }
 }

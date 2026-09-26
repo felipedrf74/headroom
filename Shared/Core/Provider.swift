@@ -91,6 +91,12 @@ struct ProviderDescriptor: Sendable {
 /// How a provider's API key is entered.
 struct KeySpec: Sendable {
     var label = "API key"
+
+    /// "Create an API key", "Create a fine-grained token".
+    var createTitle: String {
+        let article = label.first.map { "aeiouAEIOU".contains($0) } == true ? "an" : "a"
+        return "Create \(article) \(label)"
+    }
     /// Where to create a key.
     var createURL: URL
     /// Start of a typical key, shown as a hint.

@@ -89,6 +89,9 @@ struct QuotaAmount: Equatable, Codable, Sendable {
     var remaining: Double? = nil
     /// `usd`, `cny`, `credits`, `requests`, `tokens`, or `points`.
     var unit: String
+    /// True when `limit` is a budget or reference set in Tokenroom rather than the provider's,
+    /// so a saved reading can take a new one (`RelayProvider.applyingBudget`).
+    var isBudget: Bool? = nil
 
     var remainingOrComputed: Double? {
         remaining ?? limit.flatMap { limit in used.map { limit - $0 } }

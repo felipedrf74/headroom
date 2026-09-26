@@ -44,3 +44,25 @@ enum RelayMerge {
         }
     }
 }
+
+extension ReadingCache {
+    /// Other devices' readings in this cache, as merge sources with their history. They stand in
+    /// while iCloud can't be read, so a reader doesn't drop to only this iPhone's providers; each
+    /// is dated by its own checks, so it ages out if iCloud stays away.
+    func carriedSources(excluding localLabel: String) -> [(source: RelayMerge.Source, history: RelayHistory)] {
+        guard !isSample else { return [] }
+        let others = Dictionary(grouping: items.filter { $0.source != localLabel }, by: \.source)
+        return others.keys.sorted().map { label in
+            let items = others[label] ?? []
+            var series: [String: UsageHistory] = [:]
+            for item in items {
+                for (window, week) in item.history {
+                    series[RelayHistory.key(provider: item.id, window: window)] = week
+                }
+            }
+            let checkedAt = items.compactMap { $0.provider.checkedAt ?? $0.provider.fetchedAt }.max() ?? savedAt
+            let envelope = RelayEnvelope(producer: "cache", appVersion: TokenroomIdentity.version, checkedAt: checkedAt, providers: items.map(\.provider))
+            return (RelayMerge.Source(id: "previous-" + label, label: label, envelope: envelope), RelayHistory(series: series))
+        }
+    }
+}

@@ -15,6 +15,7 @@ struct TokenroomWatchWidgets: WidgetBundle {
 struct ComplicationEntry: TimelineEntry {
     var date: Date
     var items: [ReadingCache.Item]
+    var isSample = false
 }
 
 struct ComplicationProvider: TimelineProvider {
@@ -23,21 +24,24 @@ struct ComplicationProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping @Sendable (ComplicationEntry) -> Void) {
-        let items = ReadingCache.defaultURL.flatMap(ReadingCache.load)?.items ?? []
-        completion(ComplicationEntry(date: .now, items: context.isPreview && items.isEmpty ? SampleData.cache().items : items))
+        let saved = ReadingCache.defaultURL.flatMap(ReadingCache.load)
+        let cache = context.isPreview && (saved?.items.isEmpty ?? true) ? SampleData.cache() : saved
+        completion(ComplicationEntry(date: .now, items: cache?.items ?? [], isSample: cache?.isSample ?? false))
     }
 
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<ComplicationEntry>) -> Void) {
+        let widget = "watch-\(context.family)"
         Task {
             let now = Date.now
+            let reloads = WidgetReloadLog.record(widget, at: now)
             let cache = await RelayReadings.cache(at: ReadingCache.defaultURL, maxAge: 15 * 60, budget: 6, now: now)
             // One entry now and one at each reset in the next 8 hours, so rings empty on time.
             let horizon = now.addingTimeInterval(8 * 3600)
             let resets = Set((cache?.items ?? []).flatMap { $0.provider.windows.compactMap(\.resetsAt) }.filter { $0 > now && $0 < horizon })
             let entries = ([now] + resets.sorted().prefix(11)).map { date in
-                ComplicationEntry(date: date, items: (cache?.items ?? []).map { $0.rolledOver(at: date) })
+                ComplicationEntry(date: date, items: (cache?.items ?? []).map { $0.rolledOver(at: date) }, isSample: cache?.isSample ?? false)
             }
-            completion(Timeline(entries: entries, policy: .after(WidgetSchedule.nextReload(after: now, items: cache?.items ?? []))))
+            completion(Timeline(entries: entries, policy: .after(WidgetSchedule.nextReload(after: now, items: cache?.items ?? [], reloads: reloads))))
         }
     }
 }
@@ -65,9 +69,12 @@ private struct ComplicationView: View {
 
     /// Circular and corner complications show one provider and open it; the rest open the list.
     private var link: URL? {
-        guard let first = entry.items.first, family == .accessoryCircular || family == .accessoryCorner else { return nil }
+        guard let first = entry.items.first, family == .accessoryCircular || family == .accessoryCorner else { return Self.listURL }
         return DeepLink.provider(first.id).url
     }
+
+    /// Not a provider's link, so the Watch app opens on its list rather than where it was left.
+    private static let listURL = URL(string: "\(DeepLink.scheme)://usage")
 
     @ViewBuilder
     private var content: some View {
@@ -76,46 +83,99 @@ private struct ComplicationView: View {
             let used = min(max(window?.used ?? 0, 0), 100)
             switch family {
             case .accessoryCorner:
-                Text(ReadingText.headline(window))
+                let balance = window.flatMap { $0.isMetered ? nil : $0.amount }
+                // A balance has nothing to fill: its amount, and the provider's name for a label.
+                Text(balance.map(ReadingText.circleAmount) ?? ReadingText.headline(window))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .widgetCurvesContent()
                     .widgetLabel {
-                        Gauge(value: used, in: 0...100) {
+                        if entry.isSample {
+                            Text("Sample")
+                        } else if balance != nil {
                             Text(first.provider.shortName)
+                        } else {
+                            Gauge(value: used, in: 0...100) {
+                                Text(first.provider.shortName)
+                            }
+                            .tint(ringTint)
                         }
-                        .tint(ringTint)
                     }
             case .accessoryRectangular:
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(entry.items.prefix(3)) { item in
+                    // Samples give up a row to say so.
+                    ForEach(entry.items.prefix(entry.isSample ? 2 : 3)) { item in
+                        let row = item.provider.primaryWindow
                         HStack(spacing: 4) {
                             Text(item.provider.shortName)
                                 .font(.system(size: 12, weight: .semibold))
                                 .frame(width: 52, alignment: .leading)
                                 .lineLimit(1)
-                            Gauge(value: min(max(item.provider.primaryWindow?.used ?? 0, 0), 100), in: 0...100) { EmptyView() }
-                                .gaugeStyle(.accessoryLinearCapacity)
-                                .tint(ringTint)
-                            Text(ReadingText.headline(item.provider.primaryWindow))
+                            if row?.isMetered == false, row?.amount != nil {
+                                // A balance: its amount, with no empty bar beside it.
+                                Spacer(minLength: 0)
+                            } else {
+                                Gauge(value: min(max(row?.used ?? 0, 0), 100), in: 0...100) { EmptyView() }
+                                    .gaugeStyle(.accessoryLinearCapacity)
+                                    .tint(ringTint)
+                            }
+                            Text(ReadingText.headline(row))
                                 .font(.system(size: 12).monospacedDigit())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
+                    }
+                    if entry.isSample {
+                        Text("Sample data")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
                     }
                 }
             case .accessoryInline:
-                Text(entry.items.prefix(2).map { "\($0.provider.shortName) \(ReadingText.headline($0.provider.primaryWindow))" }.joined(separator: " · "))
+                Text(inlineText)
             default:
-                Gauge(value: used, in: 0...100) {
-                    Text(first.provider.monogram)
-                } currentValueLabel: {
-                    Text(TokenroomFormat.percentText(used))
-                        .monospacedDigit()
+                if let window, !window.isMetered, let amount = window.amount {
+                    // A balance has nothing to fill: its amount, rather than a ring reading 0.
+                    ZStack {
+                        AccessoryWidgetBackground()
+                        VStack(spacing: 0) {
+                            Text(ReadingText.circleAmount(amount))
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .minimumScaleFactor(0.5)
+                            Text(entry.isSample ? "Sample" : first.provider.monogram)
+                                .font(.system(size: 10, weight: .medium))
+                                .minimumScaleFactor(0.6)
+                        }
+                        .lineLimit(1)
+                        .padding(4)
+                    }
+                } else {
+                    Gauge(value: used, in: 0...100) {
+                        Text(first.provider.monogram)
+                    } currentValueLabel: {
+                        // Samples say so where the number goes; the ring still shows the level.
+                        if entry.isSample {
+                            Text("Sample")
+                                .font(.system(size: 9, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        } else {
+                            Text(TokenroomFormat.percentText(used))
+                                .monospacedDigit()
+                        }
+                    }
+                    .gaugeStyle(.accessoryCircular)
+                    .tint(ringTint)
                 }
-                .gaugeStyle(.accessoryCircular)
-                .tint(ringTint)
             }
         } else {
             Image(systemName: "gauge.with.dots.needle.50percent")
         }
+    }
+
+    /// "Codex 78% · Claude 64%", after "Sample" for samples.
+    private var inlineText: String {
+        let readings = entry.items.prefix(2).map { "\($0.provider.shortName) \(ReadingText.headline($0.provider.primaryWindow))" }
+        return ((entry.isSample ? ["Sample"] : []) + readings).joined(separator: " · ")
     }
 
     private var ringTint: Gradient {
@@ -146,40 +206,29 @@ struct WindowIntent: WidgetConfigurationIntent {
 struct ResetSoonEntry: RelevanceEntry {
     var item: ReadingCache.Item?
     var windowID: String?
+    var isSample = false
 }
 
 /// Relevant in the Smart Stack for the last 8 hours before a session or a busy window resets,
-/// and for the next half day whenever a window is at 80% or more.
+/// and for the next half day whenever a window is at 80% or more (`WidgetSchedule.relevance`).
 struct ResetSoonProvider: RelevanceEntriesProvider {
-    static let busyUse = 80.0
-    static let busySpan: TimeInterval = 12 * 3600
-
     func relevance() async -> WidgetRelevance<WindowIntent> {
         let now = Date.now
         let items = ReadingCache.defaultURL.flatMap(ReadingCache.load)?.items ?? []
-        var attributes: [WidgetRelevanceAttribute<WindowIntent>] = []
-        for item in items where item.provider.isLive {
-            if let window = item.provider.windowToFollow(now: now), let resetsAt = window.resetsAt {
-                let start = max(now, resetsAt.addingTimeInterval(-RelayProvider.followHorizon))
-                attributes.append(WidgetRelevanceAttribute(
-                    configuration: WindowIntent(providerID: item.id, windowID: window.id),
-                    context: .date(range: start...resetsAt, kind: .default)
-                ))
-            } else if let window = item.provider.windows.filter({ $0.isMetered && $0.used >= Self.busyUse }).max(by: { $0.used < $1.used }) {
-                let end = min(window.resetsAt ?? now.addingTimeInterval(Self.busySpan), now.addingTimeInterval(Self.busySpan))
-                guard end > now else { continue }
-                attributes.append(WidgetRelevanceAttribute(
-                    configuration: WindowIntent(providerID: item.id, windowID: window.id),
-                    context: .date(range: now...end, kind: .default)
-                ))
+        let attributes = items.flatMap { item in
+            WidgetSchedule.relevance(of: item.provider, now: now).map { relevant in
+                WidgetRelevanceAttribute(
+                    configuration: WindowIntent(providerID: item.id, windowID: relevant.window.id),
+                    context: .date(range: relevant.span, kind: .default)
+                )
             }
         }
         return WidgetRelevance(attributes)
     }
 
     func entry(configuration: WindowIntent, context: Context) async throws -> ResetSoonEntry {
-        let items = ReadingCache.defaultURL.flatMap(ReadingCache.load)?.items ?? []
-        return ResetSoonEntry(item: items.first { $0.id == configuration.providerID }, windowID: configuration.windowID)
+        let cache = ReadingCache.defaultURL.flatMap(ReadingCache.load)
+        return ResetSoonEntry(item: cache?.items.first { $0.id == configuration.providerID }, windowID: configuration.windowID, isSample: cache?.isSample ?? false)
     }
 
     func placeholder(context: Context) -> ResetSoonEntry {
@@ -210,11 +259,16 @@ private struct ResetSoonView: View {
                         .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                    if let resetsAt = window.resetsAt, resetsAt > .now {
-                        Text("Resets in \(Text(resetsAt, style: .relative))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Group {
+                        if let resetsAt = window.resetsAt, resetsAt > .now {
+                            Text("Resets in \(Text(resetsAt, style: .relative))")
+                        }
+                        if entry.isSample {
+                            Text("Sample data")
+                        }
                     }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
             .widgetURL(DeepLink.provider(item.id).url)

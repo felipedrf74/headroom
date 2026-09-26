@@ -37,7 +37,13 @@ enum RelayErrorPolicy {
         case .notAuthenticated:
             return .noAccount
         case .userDeletedZone:
-            return .paused("Tokenroom's iCloud data was deleted. Turn sync off and on to start again.")
+            // Deleted in iCloud settings. CloudKit asks apps not to re-create it on their own,
+            // so it starts again when the user turns the Mac's sync back on.
+            #if os(macOS)
+            return .paused("Tokenroom's iCloud data was deleted. To start again, turn Send readings to iCloud off and on in Settings › iPhone & Watch.")
+            #else
+            return .paused("Tokenroom's iCloud data was deleted. To start again, turn Send readings to iCloud off and on in Tokenroom on your Mac, or choose Delete Tokenroom Data from iCloud in Settings here.")
+            #endif
         case .quotaExceeded:
             return .paused("Couldn't save: iCloud storage is full.")
         case .requestRateLimited, .zoneBusy, .serviceUnavailable, .networkUnavailable, .networkFailure:

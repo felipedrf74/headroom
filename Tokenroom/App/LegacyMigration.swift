@@ -5,6 +5,8 @@ import Foundation
 enum LegacyMigration {
     static let migratedKey = "migratedFromHeadroom"
     static let dismissedNoticeKey = "dismissedHeadroomNotice"
+    /// Launch at login isn't one of them: Headroom's login item belongs to Headroom, and another
+    /// app's can't be read. The Headroom notice offers Tokenroom's own instead.
     private static let settingKeys = [
         AppSettings.Keys.enabled,
         AppSettings.Keys.refreshMinutes,

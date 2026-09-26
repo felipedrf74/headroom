@@ -17,9 +17,12 @@ final class MobileLogicTests: XCTestCase {
 
     /// A throwaway stand-in for the App Group's defaults.
     private func makeDefaults() -> UserDefaults {
-        let name = "tokenroom.tests.\(UUID().uuidString)"
+        // Named by the class and a count: macOS keeps an empty preferences file for every name.
+        let name = "tokenroom.tests.\(Self.self).\(suites.count)"
         suites.append(name)
-        return UserDefaults(suiteName: name)!
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
     }
 
     private func snapshot(_ provider: Provider = .claude, used: Double = 40, fetchedAt: Date? = nil) -> QuotaSnapshot {
@@ -85,6 +88,83 @@ final class MobileLogicTests: XCTestCase {
         XCTAssertTrue(policy.isDue(envelope, now: now.addingTimeInterval(1)))
     }
 
+    func testPublishingGoesOnWhenTheClockIsSetBack() {
+        var policy = RelayPublishPolicy()
+        let envelope = RelayEnvelope(producer: "iphone", appVersion: "1", checkedAt: now, providers: [RelayProvider(provider: .openrouter, status: .live(snapshot(.openrouter)), checkedAt: now)])
+        policy.didSend(envelope, at: now)
+        let dayEarlier = now.addingTimeInterval(-86_400)
+        XCTAssertTrue(policy.isDue(envelope, now: dayEarlier), "Set back a day, sending doesn't wait a day")
+        policy.didSend(envelope, at: dayEarlier)
+        XCTAssertFalse(policy.isDue(envelope, now: dayEarlier.addingTimeInterval(29 * 60)), "Then it counts from that send")
+        XCTAssertTrue(policy.isDue(envelope, now: dayEarlier.addingTimeInterval(30 * 60)))
+    }
+
+    private func envelope(_ windows: [RelayWindow], extra: ExtraUsage? = nil) -> RelayEnvelope {
+        let provider = RelayProvider(id: "x", name: "X", shortName: "X", monogram: "X", tint: "#000000", state: "live", checkedAt: now, fetchedAt: now,
+                                     primaryWindowID: windows.first?.id, windows: windows, extra: extra)
+        return RelayEnvelope(producer: "mac", appVersion: "1", checkedAt: now, providers: [provider])
+    }
+
+    private func balance(_ remaining: Double) -> RelayWindow {
+        RelayWindow(id: "balance-usd", kind: "pool", title: "Balance", used: 0, amount: QuotaAmount(remaining: remaining, unit: "usd"), metered: false)
+    }
+
+    func testAmountsCountAsTheyreShown() {
+        let base = envelope([balance(12.40)]).materialHash
+        XCTAssertNotEqual(envelope([balance(12.39)]).materialHash, base, "A balance a cent lower reaches the other devices")
+        XCTAssertEqual(envelope([balance(12.401)]).materialHash, base, "Less than a cent isn't shown, so it isn't a change")
+
+        let spend = RelayWindow(id: "spend-month", kind: "monthly", title: "This month", used: 0, resetsAt: now.addingTimeInterval(5 * 86_400), amount: QuotaAmount(used: 312.5, unit: "usd"), metered: false)
+        var more = spend
+        more.amount?.used = 312.75
+        XCTAssertNotEqual(envelope([more]).materialHash, envelope([spend]).materialHash, "Nor does a month's spend")
+
+        let requests = RelayWindow(id: "premium", kind: "monthly", title: "Premium requests", used: 83, resetsAt: now.addingTimeInterval(5 * 86_400), amount: QuotaAmount(used: 249, limit: 300, remaining: 51, unit: "requests"))
+        var another = requests
+        another.amount = QuotaAmount(used: 250, limit: 300, remaining: 50, unit: "requests")
+        XCTAssertNotEqual(envelope([another]).materialHash, envelope([requests]).materialHash, "\"250 of 300\" shows though the percent rounds the same")
+
+        let extra = ExtraUsage(title: "Extra usage", amount: QuotaAmount(used: 5, limit: 10, remaining: 5, unit: "usd"))
+        var lower = extra
+        lower.amount.remaining = 4.99
+        XCTAssertNotEqual(envelope([balance(12.4)], extra: lower).materialHash, envelope([balance(12.4)], extra: extra).materialHash, "Extra usage counts to the cent too")
+        var off = extra
+        off.isEnabled = false
+        XCTAssertNotEqual(envelope([balance(12.4)], extra: off).materialHash, envelope([balance(12.4)], extra: extra).materialHash)
+
+        // Still at most every five minutes, like any other change.
+        var policy = RelayPublishPolicy()
+        policy.didSend(envelope([balance(12.4)]), at: now)
+        XCTAssertFalse(policy.isDue(envelope([balance(12.39)]), now: now.addingTimeInterval(4 * 60)))
+        XCTAssertTrue(policy.isDue(envelope([balance(12.39)]), now: now.addingTimeInterval(5 * 60)))
+    }
+
+    func testAMeasuredRunOutGoesOutOnceItMovesAnHour() {
+        func weekly(_ pace: RelayPace?, resetsIn reset: TimeInterval = 3 * 86_400) -> RelayWindow {
+            RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 70, resetsAt: now.addingTimeInterval(reset), periodSec: 7 * 86_400, pace: pace)
+        }
+        func runsOut(in minutes: Double, resetsIn reset: TimeInterval = 3 * 86_400) -> RelayEnvelope {
+            envelope([weekly(RelayPace(runsOutAt: now.addingTimeInterval(minutes * 60)), resetsIn: reset)])
+        }
+        XCTAssertEqual(runsOut(in: 125).materialHash, runsOut(in: 185).materialHash, "Widgets don't draw it; the publish policy follows it")
+
+        var policy = RelayPublishPolicy()
+        policy.didSend(runsOut(in: 125), at: now)
+        XCTAssertFalse(policy.isDue(runsOut(in: 170), now: now.addingTimeInterval(10 * 60)), "Drifting under an hour isn't a change")
+        XCTAssertFalse(policy.isDue(runsOut(in: 185), now: now.addingTimeInterval(4 * 60)))
+        XCTAssertTrue(policy.isDue(runsOut(in: 185), now: now.addingTimeInterval(5 * 60)), "A run-out an hour later goes out without waiting for the heartbeat")
+        XCTAssertTrue(policy.isDue(envelope([weekly(RelayPace(runsOutAt: nil))]), now: now.addingTimeInterval(5 * 60)), "Running out, or not")
+        XCTAssertTrue(policy.isDue(envelope([weekly(nil)]), now: now.addingTimeInterval(5 * 60)), "No longer measured")
+
+        // Wobbling across an hour boundary, or around the reset, doesn't go out every 5 minutes.
+        policy.didSend(runsOut(in: 175), at: now)
+        XCTAssertFalse(policy.isDue(runsOut(in: 185), now: now.addingTimeInterval(10 * 60)))
+        XCTAssertFalse(policy.isDue(runsOut(in: 165), now: now.addingTimeInterval(10 * 60)))
+        policy.didSend(envelope([weekly(RelayPace(runsOutAt: nil), resetsIn: 3 * 3600)]), at: now)
+        XCTAssertFalse(policy.isDue(runsOut(in: 140, resetsIn: 3 * 3600), now: now.addingTimeInterval(10 * 60)), "Forty minutes before the reset is as good as lasting")
+        XCTAssertTrue(policy.isDue(runsOut(in: 100, resetsIn: 3 * 3600), now: now.addingTimeInterval(10 * 60)))
+    }
+
     // MARK: Ranking
 
     func testRankingPutsUrgentMeteredReadingsFirst() {
@@ -99,6 +179,23 @@ final class MobileLogicTests: XCTestCase {
         let paces: [String: Pace] = ["Urgent": Pace(verdict: .ahead, delta: 20, elapsedFraction: 0.3, resetsAt: now, runsOutAt: now, severity: .tight)]
         let sorted = UsageRanking.sorted([balance, calm, urgent, tie], provider: { $0 }, pace: { paces[$0.name] })
         XCTAssertEqual(sorted.map(\.name), ["Urgent", "Also calm", "Calm", "Balance"])
+    }
+
+    func testALimitReachedWithoutAResetRanksFirst() {
+        func provider(_ name: String, _ window: RelayWindow, state: String = "live") -> RelayProvider {
+            RelayProvider(id: name, name: name, shortName: name, monogram: "X", tint: "#000000", state: state, checkedAt: now, fetchedAt: now,
+                          primaryWindowID: window.id, windows: [window])
+        }
+        let keyLimit = RelayWindow(id: "key", kind: "pool", title: "Key limit", used: 100)
+        let spent = provider("Spent", keyLimit)
+        // Halfway through its week at 55%: runs out in the last quarter.
+        let weekly = provider("Weekly", RelayWindow(id: "weekly", kind: "weekly", title: "Weekly", used: 55, resetsAt: now.addingTimeInterval(3.5 * 86_400), periodSec: 7 * 86_400))
+        let pace = { (reading: RelayProvider) in UsageRanking.pace(for: reading, history: nil, now: self.now) }
+        XCTAssertEqual(pace(weekly)?.severity, .watch)
+        XCTAssertNil(pace(spent), "No reset time, no pace")
+        XCTAssertEqual(UsageRanking.sorted([weekly, spent], provider: { $0 }, pace: pace).map(\.name), ["Spent", "Weekly"])
+        let stale = provider("Spent", keyLimit, state: "stale")
+        XCTAssertEqual(UsageRanking.sorted([stale, weekly], provider: { $0 }, pace: pace).map(\.name), ["Weekly", "Spent"], "Like any stale reading, it has no urgency")
     }
 
     // MARK: Sample data
@@ -134,6 +231,10 @@ final class MobileLogicTests: XCTestCase {
         XCTAssertEqual(rechecked.materialHash, cache.materialHash, "Widgets only reload when a reading changes")
         rechecked.items[0].provider.windows[0].used += 5
         XCTAssertNotEqual(rechecked.materialHash, cache.materialHash)
+        var spent = cache
+        let deepseek = try XCTUnwrap(spent.items.firstIndex { $0.id == Provider.deepseek.rawValue })
+        spent.items[deepseek].provider.windows[0].amount?.remaining? -= 0.01
+        XCTAssertNotEqual(spent.materialHash, cache.materialHash, "A balance a cent lower reloads widgets and reaches the Watch")
 
         var newer = cache
         newer.v = ReadingCache.version + 1
@@ -261,8 +362,8 @@ final class MobileLogicTests: XCTestCase {
             WidgetReloadLog.record(at: now.addingTimeInterval(-hoursAgo * 3600), defaults: defaults)
         }
         XCTAssertEqual(WidgetReloadLog.count(lastDayBefore: now, defaults: defaults), 3)
-        let kept = defaults.array(forKey: WidgetReloadLog.defaultsKey) as? [Double]
-        XCTAssertEqual(kept?.count, 4, "Older than two days is dropped")
+        let kept = defaults.dictionary(forKey: WidgetReloadLog.defaultsKey) as? [String: [Double]]
+        XCTAssertEqual(kept?.values.map(\.count).reduce(0, +), 4, "Older than two days is dropped")
     }
 
     func testWidgetsReloadHalfHourlyOnlyWhileAWindowIsBusy() {
