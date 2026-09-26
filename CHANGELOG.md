@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.1 — Unreleased
+## 2.0.1 — 2026-09-26
 
 Fixes from an independent review of 2.0, for Tokenroom for Mac and the next iPhone and Apple Watch update.
 
